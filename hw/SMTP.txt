@@ -1,0 +1,40 @@
+# Instructions for sending SMTP mail message
+# Joshua Eckels
+# Use uuidgen to get the unique message-ID in the header
+
+dig rose-hulman.edu MX # find the mail server domain name
+telnet rhspam.rose-hulman.edu 25 # telnet mail server on port 25
+
+# Input these lines into telnet in this exact format
+
+HELO rose-hulman.edu
+MAIL FROM: <twue.wuv@rose-hulman.edu>
+RCPT TO: <wilkin@rose-hulman.edu>
+RCPT TO: <wangl3@rose-hulman.edu>
+RCPT TO: <cuiy1@rose-hulman.edu>
+DATA
+From: "Twue Wuv" <twue.wuv@rose-hulman.edu>
+Date: Tue, 21 Apr 2020 01:20:00 -0400
+Subject: Joshua Eckels CSSE432 Homework 2
+To: "Aaron Wilkin" <wilkin@rose-hulman.edu>
+Message-ID: <c6535e02-a8f4-46a3-b456-915562e9db24@rose-hulman.edu>
+
+Hello,
+
+Domain for rose-hulman.edu expires on 31-July-2021
+
+Providing DNS trace for www.hackthissite.org:
+dig . NS
+dig +norec @h.root-servers.net www.hackthissite.org
+dig +norec @b0.org.afilias-nst.org www.hackthissite.org
+dig +norec @h.ns.buddyns.com www.hackthissite.org
+ANSWER: IP = 137.74.187.104
+
+Tweasure your wuv, that bwessed awwangement,
+
+Twue Wuv
+
+.
+QUIT
+
+# End of email

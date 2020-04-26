@@ -1,0 +1,30 @@
+# Instructions for sending SMTP mail message
+# Joshua Eckels
+# Use uuidgen to get the unique message-ID in the header
+
+dig rose-hulman.edu MX # find the mail server domain name
+telnet rhspam.rose-hulman.edu 25 # telnet mail server on port 25
+
+# Input these lines into telnet in this exact format
+
+HELO rose-hulman.edu
+MAIL FROM: <twue.wuv@rose-hulman.edu>
+RCPT TO: <eckelsjd@rose-hulman.edu>
+DATA
+From: "Twue Wuv" <twue.wuv@rose-hulman.edu>
+Date: Tue, 21 Apr 2020 01:20:00 -0400
+Subject: Testing Pi
+To: "Joshua Eckels" <eckelsjd@rose-hulman.edu>
+Message-ID: <82c0ad13-bc2e-45fb-b853-e1445fca97b8@rose-hulman.edu>
+
+Hello,
+
+This is a test. Thanks for your attention.
+
+Sincerely,
+Josh
+
+.
+QUIT
+
+# End of email

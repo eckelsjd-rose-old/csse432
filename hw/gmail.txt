@@ -1,0 +1,38 @@
+# Instructions for sending SMTP mail message
+# Joshua Eckels
+# Use uuidgen to get the unique message-ID in the header
+
+dig rose-hulman.edu MX # find the mail server domain name
+telnet smtp.gmail.com 465 # telnet mail server on port 25
+
+# Input these lines into telnet in this exact format
+
+HELO v
+MAIL FROM: <madhawk69@vandals.uidaho.edu>
+RCPT TO: <hawk3641@vandals.uidaho.edu>
+DATA
+From: "Your Future Self" <madhawk69@vandals.uidaho.edu>
+Date: Sun, 19 Apr 2020 14:25:00 -0500
+Subject: Ass Foliage
+To: "Madigan Hawkins" <hawk3641@vandals.uidaho.edu>
+Message-ID: <a1bf5823-fb50-4bb5-8056-035f7339e9f8@vandals.uidaho.edu>
+
+Hello Madigan,
+
+I think it is time you heard this: there is something you should know about me.
+
+Or should I say... you?
+
+The future is unfolding before me. The past lay behind me like a great empty valley. Take hold of my hand and I will show you the future; you don't belong here anymore.
+Like a soft melting lavender candle must be snuffed out at the end of the day, so must the present time be whisked away to some unforeseenst and forlonged past. I have seen the future, and now I have returned to share it with you.
+The walls put up around your reality are fragile; the rivers of time are drying up. The end of all you know is quite closer than you think. You must abandon the tides of this world, or otherwise risk drowning in them.
+It is true that no one of the world can see beyond the edges of it. But truly I tell you, I am not of the world. I have seen beyond the edges of your imagination, and it is truly splendid. There are not enough words, nor means of expression in this dimension to which I can convey you the beauty of the splendid, unnatural reality I have come to reside in.
+
+Come with me, you must see it for yourself.
+
+Yours truly
+
+.
+QUIT
+
+# End of email
