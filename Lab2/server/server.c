@@ -24,6 +24,8 @@ Notes:
 #include <sys/wait.h>
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <sys/select.h>
+#include <sys/time.h>
 
 #define PORT "3490"
 #define BACKLOG 10
@@ -397,17 +399,6 @@ int main(int argc, char** argv) {
                             exit(1);
                         }
 
-                        // receive file data from client
-                        memset(buf,0,MAXDATASIZE+2);
-                        bytes_recv = recv(client_fd, buf, MAXDATASIZE+1,0);
-                        if (bytes_recv == -1) {
-                            perror("server: recv");
-                            exit(1);
-                        } else if (bytes_recv == 0) {
-                            break; // break when client disconnects
-                        }
-                        buf[bytes_recv] = '\0';
-
                         // convert filename to path
                         int size = strlen(DEFAULT_DIR) + strlen(filename) + 2;
                         char *path = malloc(size);
@@ -421,15 +412,55 @@ int main(int argc, char** argv) {
 
                         // write to disk
                         printf("Writing to disk...\n");
-                        FILE *fd = fopen(path, "w");
+                        FILE *fd = fopen(path, "a");
                         if (fd == NULL) {
                             free(path);
                             perror("Failed to open file");
                             exit(1);
                         }
-                        if (fputs(buf, fd) < 0) {
-                            perror("Failed during file write");
-                            exit(1);
+
+                        // block for 5 sec until data is visible on client socket
+                        fd_set rfds;
+                        struct timeval tv;
+                        int retval;
+                        tv.tv_sec = 0;
+                        tv.tv_usec = 10000;
+
+
+                        // receive file data from client from arbitrarily large message
+                        // client must send full file at once (one send() call)
+                        while (1) {
+                            FD_ZERO(&rfds);
+                            FD_SET(client_fd,&rfds);
+                            retval = select(client_fd+1,&rfds,NULL,NULL,&tv);
+                            if (retval == -1) {
+                                perror("select()");
+                            } else if (retval) {
+                                // continue through loop
+                            } else {
+                                printf("No more bytes to read. Exiting loop....\n");
+                                break;
+                            }
+
+                            memset(buf,0,MAXDATASIZE+2);
+                            bytes_recv = recv(client_fd, buf, MAXDATASIZE+1,MSG_DONTWAIT);
+                            if (bytes_recv == -1) {
+                                // catch if recv would have blocked
+                                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                                    printf("No more bytes to read. Exiting loop...\n");
+                                    break;
+                                }
+                                perror("server: recv");
+                                exit(1);
+                            } else if (bytes_recv == 0) {
+                                break; // break when client closes socket
+                            }
+                            buf[bytes_recv] = '\0';
+
+                            if (fwrite(buf,sizeof(char),bytes_recv,fd) != bytes_recv) {
+                                perror("Server error writing file");
+                                exit(1);
+                            }
                         }
                         free(path);
                         fclose(fd);

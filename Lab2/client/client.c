@@ -358,30 +358,28 @@ int main(int argc, char** argv) {
                     exit(1);
                 }
 
-                // block for 5 sec until data is visible on server socket
-                fd_set rfds;
                 struct timeval tv;
+                tv.tv_sec = 0;
+                tv.tv_usec = 10000;
                 int retval;
+                fd_set rfds;
 
-                FD_ZERO(&rfds);
-                FD_SET(sockfd,&rfds);
-                tv.tv_sec = 5;
-                tv.tv_usec = 0;
-
-                retval = select(sockfd+1,&rfds,NULL,NULL,&tv);
-
-                if (retval == -1) {
-                    perror("select()");
-                } else if (retval) {
-                    printf("Data is available now\n");
-                } else {
-                    printf("No data within five seconds.\n");
-                    break;
-                }
- 
                 // receive arbitrarily large file from server
                 // server must send full file at once (one send() call)
                 while (1) {
+                     // block for 100 usec until data is visible on server socket
+                    FD_ZERO(&rfds);
+                    FD_SET(sockfd,&rfds);
+                    retval = select(sockfd+1,&rfds,NULL,NULL,&tv);
+                    if (retval == -1) {
+                        perror("select()");
+                    } else if (retval) {
+                        // continue through loop
+                    } else {
+                        printf("No more bytes to read. Exiting loop...\n");
+                        break;
+                    }
+
                     memset(buf,0,MAXDATASIZE+2);
                     bytes_recv = recv(sockfd, buf, MAXDATASIZE+1,MSG_DONTWAIT);
                     if (bytes_recv == -1) {
@@ -395,8 +393,8 @@ int main(int argc, char** argv) {
                     }
                     buf[bytes_recv] = '\0';
 
-                   if (fputs(buf, fd) < 0) {
-                        perror("Failed during file write");
+                    if (fwrite(buf,sizeof(char),bytes_recv,fd) != bytes_recv) {
+                        perror("Client error writing file");
                         exit(1);
                     }
                 }
@@ -501,8 +499,10 @@ int main(int argc, char** argv) {
             // send file to server
             char *file_buf;
             int filesize = readAll(args[1],&file_buf);
+            printf("Filesize: %d\n",filesize);
             
             bytes_sent = send(sockfd,file_buf,filesize,0);
+            printf("Bytes sent: %d\n",bytes_sent);
             if (bytes_sent == -1) {
                 perror("client: send");
                 exit(1);
