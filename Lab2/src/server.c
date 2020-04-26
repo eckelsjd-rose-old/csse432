@@ -7,8 +7,6 @@ Notes:
 6. Understand exit codes and sighandlers
 7. Understand forking with sockets
 9. IP independence
-10. Read in files larger than max data size
-11. Handle non-text files
 */
 
 #include <sys/types.h>
@@ -30,7 +28,7 @@ Notes:
 #define PORT "3490"
 #define BACKLOG 10
 #define MAXDATASIZE 1024
-#define DEFAULT_DIR "./store"
+#define DEFAULT_DIR "../server_files"
 
 // reads entire file into a buffer
 // returns number of bytes in file

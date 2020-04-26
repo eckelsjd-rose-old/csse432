@@ -11,7 +11,7 @@
 
 #define PORT "3490"
 #define MAXDATASIZE 1024
-#define DEFAULT_DIR "./received_files"
+#define DEFAULT_DIR "../client_files"
 
 // reads entire file into a buffer
 // returns number of bytes in file

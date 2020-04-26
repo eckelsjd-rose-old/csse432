@@ -1,16 +1,24 @@
-all: ./server/server ./client/client
+BIN = ./bin
+SRC = ./src
+CC = gcc
+CFLAGS = -g
 
-server: ./server/server.o
-	gcc ./server/server.o -o ./server/server -g
+all: $(BIN)/server $(BIN)/client $(BIN)/bytes
 
-server.o: ./server/server.c
-	gcc ./server/server.c -c -g -o ./server/server.o
+$(BIN)/server: $(BIN)/server.o
+	$(CC) $(BIN)/server.o -o $(BIN)/server $(CFLAGS)
 
-client: ./client/client.o
-	gcc ./client/client.o -o ./client/client -g
+$(BIN)/server.o: $(SRC)/server.c
+	$(CC) $(SRC)/server.c -c -o $(BIN)/server.o $(CFLAGS)
 
-client.o: ./client/client.c
-	gcc ./client/client.c -c -g -o ./client/client.o
+$(BIN)/client: $(BIN)/client.o
+	$(CC) $(BIN)/client.o -o $(BIN)/client $(CFLAGS)
+
+$(BIN)/client.o: $(SRC)/client.c
+	$(CC) $(SRC)/client.c -c -o $(BIN)/client.o $(CFLAGS)
+
+$(BIN)/bytes: $(SRC)/ByteGenerator.c
+	$(CC) $(SRC)/ByteGenerator.c -o $(BIN)/bytes $(CFLAGS)
 
 clean:
-	rm ./client/*.o ./server/*.o ./server/server ./client/client
+	rm $(BIN)/*

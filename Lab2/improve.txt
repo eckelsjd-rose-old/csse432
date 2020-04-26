@@ -1,0 +1,14 @@
+- better makefile
+- library and include
+- IP agnostic
+- better send/recv handshaking
+- multiple ports (web, echo, ssh)
+- maxdatasize control
+- Python or GUI
+- Handle HTTP
+- diverse directory for server
+- navigate server (ssh basically)
+- requirements.txt
+- instructions/README
+- port forwarding
+- better exiting/error handling
