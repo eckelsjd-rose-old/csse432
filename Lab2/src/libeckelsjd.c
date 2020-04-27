@@ -6,6 +6,15 @@ Include with #include <eckelsjd.h> */
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <netdb.h>
+#include <sys/time.h>
+#include <sys/select.h>
 
 char* getaline() {
     int ch; // getchar() returns an int
@@ -161,7 +170,7 @@ char* getPath(char *dir, char *filename) {
 
     // check allocation
     if (path == NULL) {
-        perror("hasFile");
+        perror("getPath");
         exit(1);
     }   
 
@@ -173,5 +182,195 @@ char* getPath(char *dir, char *filename) {
     strcpy(ptr,filename);
 
     return path;
+}
+
+int setup_client(char* hostname,char* port) {
+    int status;
+    int sockfd;
+    struct addrinfo hints;
+    struct addrinfo *servinfo;
+    struct addrinfo *p;
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM; // TCP stream
+
+    // getaddrinfo()
+    if ((status = getaddrinfo(hostname,port,&hints,&servinfo)) != 0) {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
+        exit(1);
+    }
+
+    // loop through all results and connect to first we can
+    for (p = servinfo; p != NULL; p = p->ai_next) {
+        // socket
+        if ((sockfd = socket(p->ai_family, p->ai_socktype,
+                        p->ai_protocol)) == -1) {
+            perror("client: socket");
+            continue;
+        }
+
+        // connect
+        if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sockfd);
+            perror("client: connect");
+            continue;
+        }
+
+        break;
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "client: failed to connect\n");
+        exit(1);
+    }
+
+    // string buffer to get IP address of server
+    char s[INET6_ADDRSTRLEN];
+    inet_ntop(p->ai_family, &(((struct sockaddr_in *)p->ai_addr)->sin_addr),
+            s, sizeof s);
+    printf("client: connecting to %s on port %s\n", s, port);
+
+    // free addrinfo structure
+    freeaddrinfo(servinfo);
+    return sockfd;
+}
+
+int setup_server(char* port) {
+    // setup the server
+    int status;
+    int sockfd;
+    struct addrinfo hints;              // fill out a few fields by hand
+    struct addrinfo *servinfo;          // result of getaddrinfo()
+    struct addrinfo *p;                 // temporary pointer to a struct addrinfo
+
+    // input some known information to hints
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;        // AF_INET, AF_INET6, AF_UNSPEC
+    hints.ai_socktype = SOCK_STREAM;    // TCP stream sockets
+    hints.ai_flags = AI_PASSIVE;        // fill in the host IP automatically
+
+    // getaddrinfo does DNS lookup and fills out the struct addrinfo *servinfo
+    // getaddrinfo("IP","port",hints,result);
+    // replace NULL with an IP address if you want something other than the local host
+    if ((status = getaddrinfo(NULL, port, &hints, &servinfo)) != 0) {
+        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+        exit(1);
+    }
+
+    // servinfo points to a linked list of 1 or more struct addrinfos
+    // loop through this list and find the first acceptable address struct
+    int yes = 1;
+    for(p = servinfo; p != NULL; p = p->ai_next) {
+        // socket
+        if ((sockfd = socket(p->ai_family, p->ai_socktype,
+                        p->ai_protocol)) == -1) {
+            perror("server: socket");
+            continue;
+        }
+
+        // lose the "Address already in use" error message
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes,
+                    sizeof yes) == -1) {
+            perror("server: setsockopt");
+            exit(1);
+        }
+
+        // bind
+        if (bind(sockfd,p->ai_addr, p->ai_addrlen) == -1) {
+            close(sockfd);
+            perror("server: bind");
+            continue;
+        }
+
+        break;
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "server: failed to bind\n");
+        exit(1);
+    } 
+
+    freeaddrinfo(servinfo); // free linked-list
+
+    // listen
+    int backlog = 10;
+    if (listen(sockfd, backlog) == -1) {
+        perror("server: listen");
+        exit(1);
+    }
+
+    return sockfd;
+}
+
+int qrecv(int sockfd, char *buf, int size, int flags) {
+    memset(buf,0,size+1);
+    int bytes_recv = recv(sockfd,buf,size,flags);
+    if (bytes_recv == -1) {
+        perror("recv");
+        exit(1);
+    } else if (bytes_recv == 0) {
+        return 0; // signal when client disconnects
+    }
+    buf[bytes_recv] = '\0';
+    return bytes_recv;
+}
+
+int qsend(int sockfd, char *buf, int size, int flags) {
+    int bytes_sent = send(sockfd,buf,size,flags);
+    if (bytes_sent == -1) {
+        perror("send");
+        exit(1);
+    } else if (bytes_sent != size) {
+        // handle incorrect number of bytes sent
+        fprintf(stderr,"Wrong number of bytes sent");
+        exit(1);
+    }
+    return bytes_sent;
+}
+
+int qrecv_big(int sockfd, char *path, char *buf, int datasize) {
+    FILE *fd = fopen(path, "a");
+    if (fd == NULL) {
+        perror("qrecv_big");
+        exit(1);
+    }
+
+    // block until data is visible on socket
+    fd_set rfds;
+    struct timeval tv;
+    int retval;
+    tv.tv_sec = 0;
+    tv.tv_usec = 10000;
+
+    // receive arbitrarily large file data
+    // client must send full file at once (one send() call)
+    int total_bytes = 0;
+    while (1) {
+        FD_ZERO(&rfds);
+        FD_SET(sockfd,&rfds);
+        retval = select(sockfd+1,&rfds,NULL,NULL,&tv);
+        if (retval == -1) {
+            perror("select()");
+            exit(1);
+        } else if (retval) {
+            // continue through loop
+        } else {
+            // done reading
+            break;
+        }
+
+        // will only receive if recv will be non-blocking
+        int bytes_recv;
+        if ( (bytes_recv = qrecv(sockfd, buf, datasize, 0)) == 0) { break; }
+        total_bytes += bytes_recv;
+
+        if (fwrite(buf,sizeof(char),bytes_recv,fd) != bytes_recv) {
+            perror("qrecv_big");
+            exit(1);
+        }
+    }
+    fclose(fd);
+    return total_bytes;
 }
 

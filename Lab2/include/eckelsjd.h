@@ -74,10 +74,34 @@ char* getPath(char *dir, char *filename);
 
 
 /* Socket functions */
-/*
-   send
-   recv
-   recv_big
-   setup_client
-   setup_server
+
+/* Setup a client TCP socket with connection to char *hostname
+   on given port number
+Returns:
+    int sockfd : TCP socket fd that client is connected to
 */
+int setup_client(char* hostname, char* port); 
+
+/* Setup a server TCP socket on localhost that listens 
+   at the given port number
+Returns:
+    int sockfd : TCP socket fd that server is connected to
+*/
+int setup_server(char* port); 
+
+/* Quick recv wrapper; does error checking */
+int qrecv(int sockfd, char *buf, int size, int flags);
+
+/* Quick send wrapper; does error checking */
+int qsend(int sockfd, char *buf, int size, int flags);
+
+/* Quick recv wrapper for big files
+Parameters:
+    int sockfd   : socket file descriptor to recv from
+    char *path   : path to file to write to
+    char *buf    : preallocated buffer to recv data to
+    int datasize : chunksize of data recv'd to buffer
+Return:
+    int total_bytes : total number of bytes written
+*/
+int qrecv_big(int sockfd, char *path, char *buf, int datasize);

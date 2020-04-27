@@ -1,5 +1,5 @@
-/* Basic echo server in C
-Date: 4/11/20
+/* File transfer server
+Date: 4/27/20
 Author: Joshua Eckels
 Class: CSSE432 - networks
 Notes:
@@ -7,6 +7,8 @@ Notes:
 6. Understand exit codes and sighandlers
 7. Understand forking with sockets
 9. IP independence
+10. Use forking to listen on multiple ports
+11. Use exec to allow ssh client->server
 */
 
 #include <sys/types.h>
@@ -28,7 +30,6 @@ Notes:
 #include <eckelsjd.h>
 
 #define PORT "3490"
-#define BACKLOG 10
 #define MAXDATASIZE 1024
 #define DEFAULT_DIR "../server_files"
 
@@ -48,72 +49,6 @@ void sigchld_handler(int s) {
     int saved_errno = errno;
     while(waitpid(-1,NULL,WNOHANG) > 0);
     errno = saved_errno;
-}
-
-int setup_server(char* port) {
-    // setup the server
-    int status;
-    int sockfd;
-    struct addrinfo hints;              // fill out a few fields by hand
-    struct addrinfo *servinfo;          // result of getaddrinfo()
-    struct addrinfo *p;                 // temporary pointer to a struct addrinfo
-
-    // input some known information to hints
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;        // AF_INET, AF_INET6, AF_UNSPEC
-    hints.ai_socktype = SOCK_STREAM;    // TCP stream sockets
-    hints.ai_flags = AI_PASSIVE;        // fill in the host IP automatically
-
-    // getaddrinfo does DNS lookup and fills out the struct addrinfo *servinfo
-    // getaddrinfo("IP","port",hints,result);
-    // replace NULL with an IP address if you want something other than the local host
-    if ((status = getaddrinfo(NULL, port, &hints, &servinfo)) != 0) {
-        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
-        exit(1);
-    }
-
-    // servinfo points to a linked list of 1 or more struct addrinfos
-    // loop through this list and find the first acceptable address struct
-    int yes = 1;
-    for(p = servinfo; p != NULL; p = p->ai_next) {
-        // socket
-        if ((sockfd = socket(p->ai_family, p->ai_socktype,
-                        p->ai_protocol)) == -1) {
-            perror("server: socket");
-            continue;
-        }
-
-        // lose the "Address already in use" error message
-        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes,
-                    sizeof yes) == -1) {
-            perror("server: setsockopt");
-            exit(1);
-        }
-
-        // bind
-        if (bind(sockfd,p->ai_addr, p->ai_addrlen) == -1) {
-            close(sockfd);
-            perror("server: bind");
-            continue;
-        }
-
-        break;
-    }
-
-    if (p == NULL) {
-        fprintf(stderr, "server: failed to bind\n");
-        exit(1);
-    } 
-
-    freeaddrinfo(servinfo); // free linked-list
-
-    // listen
-    if (listen(sockfd, BACKLOG) == -1) {
-        perror("server: listen");
-        exit(1);
-    }
-
-    return sockfd;
 }
 
 /* Main function starts a server
@@ -169,43 +104,22 @@ int main(int argc, char** argv) {
         } else if (pid == 0) { // child will handle the client
             close(sockfd); // child doesn't need server listener anymore
 
-            // main server loop
+            // main server<->client loop
+            int bytes_recv;
+            int bytes_sent;
+            char buf[MAXDATASIZE+1];
             while (1) {
-                // recv command from client
-                char buf[MAXDATASIZE+2];
-                int bytes_recv = recv(client_fd, buf, MAXDATASIZE+1,0);
-                if (bytes_recv == -1) {
-                    perror("server: recv");
-                    exit(1);
-                } else if (bytes_recv == 0) {
-                    break; // break when client disconnects
-                }
-                buf[bytes_recv] = '\0';
+                // get a command from client
+                if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
                 printf("Command received from client: \"%s\"\n",buf);
 
                 // handle iWant command
                 if (strcmp(buf,"iWant") == 0) {
                     // confirm connection with client
-                    int bytes_sent = send(client_fd,buf,strlen(buf)+1,0);
-                    if (bytes_sent == -1) {
-                        perror("server: send");
-                        exit(1);
-                    } else if (bytes_sent != strlen(buf)+1) {
-                        // handle incorrect number of bytes sent
-                        printf("Msg length: %ld. Bytes sent: %d.\n",strlen(buf)+1,bytes_sent);
-                        exit(1);
-                    }
+                    bytes_sent = qsend(client_fd,buf,strlen(buf)+1,0);
 
                     // get the filename from client
-                    memset(buf,0,MAXDATASIZE+2);
-                    bytes_recv = recv(client_fd, buf, MAXDATASIZE+1,0);
-                    if (bytes_recv == -1) {
-                        perror("server: recv");
-                        exit(1);
-                    } else if (bytes_recv == 0) {
-                        break; // break when client disconnects
-                    }
-                    buf[bytes_recv] = '\0';
+                    if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
                     printf("Client requesting file: \"%s\"\n",buf);
 
                     // check if server has the file
@@ -213,46 +127,22 @@ int main(int argc, char** argv) {
                     if (isValidPath(filepath)) {
                         printf("Filepath: %s\n",filepath);
                         // send success to client
-                        bytes_sent = send(client_fd,"Success",strlen("Success"),0);
-                        if (bytes_sent == -1) {
-                            perror("server: send");
-                            exit(1);
-                        } else if (bytes_sent != strlen("Success")) {
-                            // handle incorrect number of bytes sent
-                            printf("Msg length: %ld. Bytes sent: %d.\n",strlen("Success"),bytes_sent);
-                            exit(1);
-                        }
+                        bytes_sent = qsend(client_fd,"Success",strlen("Success")+1,0);
 
                         // wait for client to request transfer to begin
-                        memset(buf,0,MAXDATASIZE+2);
-                        bytes_recv = recv(client_fd, buf, MAXDATASIZE+1,0);
-                        if (bytes_recv == -1) {
-                            perror("server: recv");
-                            exit(1);
-                        } else if (bytes_recv == 0) {
-                            break; // break when client disconnects
-                        }
-                        buf[bytes_recv] = '\0';
+                        if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
 
                         // start file transfer
                         if (strcmp(buf,"Start") == 0) {
                             char *file_buf;
                             int filesize = readAll(filepath, &file_buf);
 
-                            bytes_sent = send(client_fd,file_buf,filesize,0);
-                            if (bytes_sent == -1) {
-                                perror("server: send");
-                                exit(1);
-                            } else if (bytes_sent != filesize) {
-                                // handle incorrect number of bytes sent
-                                printf("Msg length: %d. Bytes sent: %d.\n",filesize,bytes_sent);
-                                exit(1);
-                            }
-
+                            bytes_sent = qsend(client_fd,file_buf,filesize,0);
                             printf("File transfer to client completed.\n");
+
                             free(file_buf);
                             free(filepath);
-                            // continue
+                            continue;
 
                         } else {
                             // something went wrong
@@ -262,165 +152,55 @@ int main(int argc, char** argv) {
 
                     } else {
                         // file not found on server
-                        // send failure message to client
-                        bytes_sent = send(client_fd,"Failure",strlen("Failure"),0);
-                        if (bytes_sent == -1) {
-                            perror("server: send");
-                            exit(1);
-                        } else if (bytes_sent != strlen("Failure")) {
-                            // handle incorrect number of bytes sent
-                            printf("Msg length: %ld. Bytes sent: %d.\n",strlen("Failure"),bytes_sent);
-                            exit(1);
-                        }
-
+                        bytes_sent = qsend(client_fd,"Failure",strlen("Failure")+1,0);
                         free(filepath);
                         printf("File: \"%s\" not found.\n",buf);
-                        // continue
+                        continue;
                     }
-
                 }
 
                 // handle uTake command
                 else if (strcmp(buf,"uTake") == 0) {
                     // confirm connection with client
-                    int bytes_sent = send(client_fd,buf,strlen(buf)+1,0);
-                    if (bytes_sent == -1) {
-                        perror("server: send");
-                        exit(1);
-                    } else if (bytes_sent != strlen(buf)+1) {
-                        // handle incorrect number of bytes sent
-                        printf("Msg length: %ld. Bytes sent: %d.\n",strlen(buf)+1,bytes_sent);
-                        exit(1);
-                    }
+                    bytes_sent = qsend(client_fd,buf,strlen(buf)+1,0);
 
                     // receive directions from client
-                    memset(buf,0,MAXDATASIZE+2);
-                    bytes_recv = recv(client_fd, buf, MAXDATASIZE+1,0);
-                    if (bytes_recv == -1) {
-                        perror("server: recv");
-                        exit(1);
-                    } else if (bytes_recv == 0) {
-                        break; // break when client disconnects
-                    }
-                    buf[bytes_recv] = '\0';
+                    if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
 
                     // client starts file transfer
                     if (strcmp(buf,"Start") == 0) {
                         // handshaking
-                        bytes_sent = send(client_fd,"Handshaking",strlen("Handshaking")+1,0);
-                        if (bytes_sent == -1) {
-                            perror("server: send");
-                            exit(1);
-                        } else if (bytes_sent != strlen("Handshaking")+1) {
-                            // handle incorrect number of bytes sent
-                            printf("Msg length: %ld. Bytes sent: %d.\n",strlen("Handshaking")+1,bytes_sent);
-                            exit(1);
-                        }
+                        bytes_sent = qsend(client_fd,"Handshaking",strlen("Handshaking")+1,0);
 
                         // receive filename from client
-                        char filename[MAXDATASIZE+2];
-                        bytes_recv = recv(client_fd, filename, MAXDATASIZE+1,0);
-                        if (bytes_recv == -1) {
-                            perror("server: recv");
-                            exit(1);
-                        } else if (bytes_recv == 0) {
-                            break; // break when client disconnects
-                        }
-                        filename[bytes_recv] = '\0';
+                        char filename[MAXDATASIZE+1];
+                        bytes_recv = qrecv(client_fd, filename, MAXDATASIZE,0);
                         printf("Server received file \"%s\" from client.\n",filename);
 
                         // handshaking
-                        bytes_sent = send(client_fd,"Handshaking",strlen("Handshaking")+1,0);
-                        if (bytes_sent == -1) {
-                            perror("server: send");
-                            exit(1);
-                        } else if (bytes_sent != strlen("Handshaking")+1) {
-                            // handle incorrect number of bytes sent
-                            printf("Msg length: %ld. Bytes sent: %d.\n",strlen("Handshaking")+1,bytes_sent);
-                            exit(1);
-                        }
+                        bytes_sent = qsend(client_fd,"Handshaking",strlen("Handshaking")+1,0);
 
                         // convert filename to path
                         char *path = getPath(DEFAULT_DIR,filename);
-                        /*
-                        int size = strlen(DEFAULT_DIR) + strlen(filename) + 2;
-                        char *path = malloc(size);
-                        memset(path,0,size);
-                        strcpy(path,DEFAULT_DIR);
-                        char *ptr = path + strlen(DEFAULT_DIR);
-                        ptr[0] = '/';
-                        ptr = ptr + 1;
-                        strcpy(ptr,filename);
-                        */
                         printf("Path: %s\n",path);
 
                         // write to disk
                         printf("Writing to disk...\n");
-                        FILE *fd = fopen(path, "a");
-                        if (fd == NULL) {
-                            free(path);
-                            perror("Failed to open file");
-                            exit(1);
-                        }
-
-                        // block for 5 sec until data is visible on client socket
-                        fd_set rfds;
-                        struct timeval tv;
-                        int retval;
-                        tv.tv_sec = 0;
-                        tv.tv_usec = 10000;
-
-                        // receive file data from client from arbitrarily large message
-                        // client must send full file at once (one send() call)
-                        while (1) {
-                            FD_ZERO(&rfds);
-                            FD_SET(client_fd,&rfds);
-                            retval = select(client_fd+1,&rfds,NULL,NULL,&tv);
-                            if (retval == -1) {
-                                perror("select()");
-                                exit(1);
-                            } else if (retval) {
-                                // continue through loop
-                            } else {
-                                printf("No more bytes to read. Exiting loop....\n");
-                                break;
-                            }
-
-                            memset(buf,0,MAXDATASIZE+2);
-                            bytes_recv = recv(client_fd, buf, MAXDATASIZE+1,MSG_DONTWAIT);
-                            if (bytes_recv == -1) {
-                                // catch if recv would have blocked
-                                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                                    printf("No more bytes to read. Exiting loop...\n");
-                                    break;
-                                }
-                                perror("server: recv");
-                                exit(1);
-                            } else if (bytes_recv == 0) {
-                                break; // break when client closes socket
-                            }
-                            buf[bytes_recv] = '\0';
-
-                            if (fwrite(buf,sizeof(char),bytes_recv,fd) != bytes_recv) {
-                                perror("Server error writing file");
-                                exit(1);
-                            }
-                        }
+                        int total_bytes = qrecv_big(client_fd, path, buf, MAXDATASIZE);
                         free(path);
-                        fclose(fd);
-                        printf("Write success.\n");
-                        // continue
+                        printf("Write success. Total bytes: %d\n",total_bytes);
+                        continue;
                     }
 
                     else if (strcmp(buf,"No file") == 0) {
                         // client didn't have the file
                         printf("No file received from client.\n");
-                        // continue
+                        continue;
                     }
 
                     else {
                         // Something went wrong
-                        printf("Error in file transfer. Closing client...\n");
+                        fprintf(stderr,"Error in file transfer. Closing client...\n");
                         break;
                     }
 
@@ -428,8 +208,9 @@ int main(int argc, char** argv) {
 
                 // invalid command
                 else {
-                    // do nothing
-                    // command checking handled in client
+                    // command checking should be handled in client
+                    fprintf(stderr,"Invalid command. Closing client...\n");
+                    break;
                 }
                 
             }
