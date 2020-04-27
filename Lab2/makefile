@@ -1,24 +1,33 @@
 BIN = ./bin
 SRC = ./src
+LIB = ./lib
+INCLUDE = ./include
 CC = gcc
-CFLAGS = -g
+P1 = server
+P2 = client
+P3 = bytes
+L1 = eckelsjd
+CFLAGS = -g -L $(LIB) -I $(INCLUDE) -l $(L1)
 
-all: $(BIN)/server $(BIN)/client $(BIN)/bytes
+all: $(BIN)/$(P1) $(BIN)/$(P2) $(BIN)/$(P3)
 
-$(BIN)/server: $(BIN)/server.o
-	$(CC) $(BIN)/server.o -o $(BIN)/server $(CFLAGS)
+$(BIN)/$(P1): $(BIN)/$(P1).o $(LIB)/lib$(L1).so
+	$(CC) $(BIN)/$(P1).o -o $(BIN)/$(P1) $(CFLAGS)
 
-$(BIN)/server.o: $(SRC)/server.c
-	$(CC) $(SRC)/server.c -c -o $(BIN)/server.o $(CFLAGS)
+$(BIN)/$(P1).o: $(SRC)/$(P1).c
+	$(CC) $(SRC)/$(P1).c -c -o $(BIN)/$(P1).o $(CFLAGS)
 
-$(BIN)/client: $(BIN)/client.o
-	$(CC) $(BIN)/client.o -o $(BIN)/client $(CFLAGS)
+$(BIN)/$(P2): $(BIN)/$(P2).o $(LIB)/lib$(L1).so
+	$(CC) $(BIN)/$(P2).o -o $(BIN)/$(P2) $(CFLAGS)
 
-$(BIN)/client.o: $(SRC)/client.c
-	$(CC) $(SRC)/client.c -c -o $(BIN)/client.o $(CFLAGS)
+$(BIN)/$(P2).o: $(SRC)/$(P2).c 
+	$(CC) $(SRC)/$(P2).c -c -o $(BIN)/$(P2).o $(CFLAGS)
 
-$(BIN)/bytes: $(SRC)/ByteGenerator.c
-	$(CC) $(SRC)/ByteGenerator.c -o $(BIN)/bytes $(CFLAGS)
+$(LIB)/lib$(L1).so: $(SRC)/lib$(L1).c
+	$(CC) $(SRC)/lib$(L1).c -shared -o $(LIB)/lib$(L1).so -c
+
+$(BIN)/$(P3): $(SRC)/ByteGenerator.c
+	$(CC) $(SRC)/ByteGenerator.c -o $(BIN)/$(P3)
 
 clean:
 	rm $(BIN)/*

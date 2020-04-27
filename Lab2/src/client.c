@@ -9,164 +9,11 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+#include <eckelsjd.h>
+
 #define PORT "3490"
 #define MAXDATASIZE 1024
 #define DEFAULT_DIR "../client_files"
-
-// reads entire file into a buffer
-// returns number of bytes in file
-int readAll(char *path, char **buf) {
-    FILE *fd;
-    int numbytes;
-
-    fd = fopen(path, "r");
-    if (fd == NULL) {
-        perror("Failed to open file.");
-        exit(1);
-    }
-
-    // get number of bytes
-    fseek(fd, 0L, SEEK_END);
-    numbytes = ftell(fd);
-
-    // go back to beginning of file
-    fseek(fd, 0L, SEEK_SET);
-
-    *buf = malloc(sizeof(char) * numbytes);
-    memset(*buf,0,sizeof(char) * numbytes);
-
-    // copy all text into buffer
-    fread(*buf, sizeof(char),numbytes,fd);
-    fclose(fd);
-    return numbytes;
-}
-
-// determines if a valid file path
-// saves just filename if possible
-int isValidPath(char *path, char **filename) {
-    FILE *fd = fopen(path, "r");
-    if (fd == NULL) {
-        return 0;
-    }
-    fclose(fd);
-
-    // extract filename from path
-    char *path_cpy = malloc(strlen(path)+1);
-    memset(path_cpy,0,strlen(path)+1);
-    strcpy(path_cpy,path);
-
-    char delim[] = "/";
-    char *token_ptr = strtok(path_cpy, delim);
-    char *save_ptr = token_ptr;
-
-    while (token_ptr != NULL) {
-        save_ptr = token_ptr;
-        token_ptr = strtok(NULL, delim);
-    }
-
-    *filename = malloc(strlen(save_ptr)+1);
-    memset(*filename,0,strlen(save_ptr)+1);
-    strcpy(*filename,save_ptr);
-
-    free(path_cpy);
-    return 1;
-}
-
-// counts number of args
-int num_args(char** args) {
-    int num = 0;
-    for (int i = 0; strcmp(args[i],"\0") != 0;i++) {
-        num++;
-    }
-    return num;
-}
-
-// frees command line args
-void free_args(char** args) {
-    for (int i = 0; strcmp(args[i],"\0") != 0; i++) {
-       free(args[i]);
-    }
-   free(args);
-}
-
-// this function returns an allocated array 
-// of args passed in as a command line string
-char** parse_args(char* cmdline, char** args) {
-    char delim[] = " ";
-    args = malloc(sizeof(char*));
-
-    // check allocation
-    if (args == NULL) {
-        perror("Unsuccessful allocation\n");
-        exit(1);
-    }
-
-    args[0] = "\0"; // signal the end of the array
-    char *ptr = strtok(cmdline, delim); // break up cmdline into tokens
-    int i = 0;
-
-    // break up cmdline into tokens using dynamic memory reallocation
-    while (ptr != NULL) {
-        args = realloc(args, (i+2)*sizeof(char*));
-
-        // check allocation
-        if (args == NULL) {
-            perror("Unsuccessful allocation\n");
-            exit(1);
-        }
-
-        // allocate space for new token
-        char* token = malloc(strlen(ptr)+1);
-        if (token == NULL) {
-            perror("Unsuccessful allocation\n");
-            exit(1);
-        }
-        token = strcpy(token,ptr);
-
-        // add token to args list
-        args[i] = token;
-        args[i+1] = "\0";
-
-        // iterate
-        i++;
-        ptr = strtok(NULL, delim);
-    }
-
-    return args;
-}
-
-// this function dynamically allocates space from user input
-// returns a pointer to the line read from stdin
-char* getaline() {
-    int ch; // getchar() returns an int
-    
-    char* line = malloc(sizeof(char));
-    
-    // check allocation
-    if (line == NULL) {
-        perror("Unsuccessful allocation");
-        exit(1);
-    }   
-
-    line[0] = '\0';
-
-    // keep reading until we get a newline from user
-    for(int i = 0; ((ch = getchar()) != '\n') && (ch != EOF); i++) {
-        // reallocate the line
-        line = realloc(line, (i+2)*sizeof(char));
-
-        // check allocation
-        if (line == NULL) {
-            perror("unsuccessful reallocation");
-            exit(1);
-        }
-
-        line[i] = (char) ch; 
-        line[i+1] = '\0';
-    }   
-
-    return line;
-}
 
 void *get_in_addr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
@@ -252,7 +99,7 @@ int main(int argc, char** argv) {
         line = getaline();
 
         // parse client command line arguments
-        args = parse_args(line,args);
+        args = parse_args(line);
 
         if (strcmp(args[0], ".") == 0) { break; }
 
@@ -316,9 +163,12 @@ int main(int argc, char** argv) {
                 // constructs the fullpath string from user input
                 printf("Save file to path: ");
                 char *fullpath;
-                char *filename; // won't do anything with this
+                int ignore;
                 char *path = getaline();
-                if (isValidPath(path,&filename)) {
+                if (isValidPath(path)) {
+                    // convert to fullpath
+                    fullpath = getPath(path,args[1]);
+                    /*
                     int size = strlen(path) + strlen(args[1]) + 2;
                     fullpath = malloc(size);
                     memset(fullpath,0,size);
@@ -326,9 +176,11 @@ int main(int argc, char** argv) {
                     fullpath[strlen(path)] = '/';
                     char *ptr = fullpath + strlen(path) + 1;
                     strcpy(ptr, args[1]);
-                    free(filename);
+                    */
                 } else {
                     printf("Invalid path. Using default...\n");
+                    fullpath = getPath(DEFAULT_DIR,args[1]);
+                    /*
                     int size = strlen(DEFAULT_DIR) + strlen(args[1]) + 2;
                     fullpath = malloc(size);
                     memset(fullpath,0,size);
@@ -336,8 +188,10 @@ int main(int argc, char** argv) {
                     fullpath[strlen(DEFAULT_DIR)] = '/';
                     char *ptr = fullpath + strlen(DEFAULT_DIR) + 1;
                     strcpy(ptr, args[1]);
+                    */
                 }
                 free(path);
+                printf("Fullpath: %s\n",fullpath);
 
                 // send message to server requesting file transfer to begin
                 bytes_sent = send(sockfd,"Start",strlen("Start"),0);
@@ -437,8 +291,7 @@ int main(int argc, char** argv) {
             printf("Server confirmed connection: %s\n",buf);
 
             // check if arg[1] is a file on client system
-            char *filename;
-            if (isValidPath(args[1],&filename)) {
+            if (isValidPath(args[1])) {
                 // tell server message is on its way
                 bytes_sent = send(sockfd,"Start",strlen("Start"),0);
                 if (bytes_sent == -1) {
@@ -477,6 +330,7 @@ int main(int argc, char** argv) {
             buf[bytes_recv] = '\0';
 
             // send file name to server
+            char *filename = getFilename(args[1]);
             bytes_sent = send(sockfd,filename,strlen(filename)+1,0);
             if (bytes_sent == -1) {
                 perror("client: send");
@@ -499,10 +353,8 @@ int main(int argc, char** argv) {
             // send file to server
             char *file_buf;
             int filesize = readAll(args[1],&file_buf);
-            printf("Filesize: %d\n",filesize);
             
             bytes_sent = send(sockfd,file_buf,filesize,0);
-            printf("Bytes sent: %d\n",bytes_sent);
             if (bytes_sent == -1) {
                 perror("client: send");
                 exit(1);

@@ -25,67 +25,12 @@ Notes:
 #include <sys/select.h>
 #include <sys/time.h>
 
+#include <eckelsjd.h>
+
 #define PORT "3490"
 #define BACKLOG 10
 #define MAXDATASIZE 1024
 #define DEFAULT_DIR "../server_files"
-
-// reads entire file into a buffer
-// returns number of bytes in file
-int readAll(char *path, char **buf) {
-    FILE *fd;
-    int numbytes;
-    printf("Reading file: \"%s\"\n",path);
-
-    fd = fopen(path, "r");
-    if (fd == NULL) {
-        perror("Failed to open file.");
-        exit(1);
-    }
-
-    // get number of bytes
-    fseek(fd, 0L, SEEK_END);
-    numbytes = ftell(fd);
-
-    // go back to beginning of file
-    fseek(fd, 0L, SEEK_SET);
-
-    *buf = malloc(sizeof(char) * numbytes);
-    memset(*buf,0,sizeof(char) * numbytes);
-
-    // copy all text into buffer
-    fread(*buf, sizeof(char),numbytes,fd);
-    fclose(fd);
-    return numbytes;
-}
-
-// searches for filename in DEFAULT_DIR
-// saves full filepath and returns 1 or 0 on success/failure
-int hasFile(char *filename, char **path) {
-    int size = strlen(DEFAULT_DIR) + strlen(filename) + 2;
-    *path = malloc( sizeof(char) * size);
-
-    // check allocation
-    if (*path == NULL) {
-        perror("Unsuccessful allocation\n");
-        exit(1);
-    }
-
-    memset(*path,0,size);
-    strcpy(*path,DEFAULT_DIR);
-    char *ptr = *path + strlen(*path);
-    ptr[0] = '/';
-    ptr = ptr + 1;
-    strcpy(ptr,filename);
-
-    FILE *fd = fopen(*path, "r");
-    if (fd == NULL) {
-        free(*path);
-        return 0;
-    }
-    fclose(fd);
-    return 1;
-}
 
 // get sockaddr, IPv4 or IPv6
 void *get_in_addr(struct sockaddr *sa) {
@@ -219,7 +164,7 @@ int main(int argc, char** argv) {
         // spawn child to handle this client
         int pid = fork();
         if (pid < 0) {
-            perror("Fork failed.\n");
+            perror("Fork failed");
             exit(1);
         } else if (pid == 0) { // child will handle the client
             close(sockfd); // child doesn't need server listener anymore
@@ -264,8 +209,8 @@ int main(int argc, char** argv) {
                     printf("Client requesting file: \"%s\"\n",buf);
 
                     // check if server has the file
-                    char *filepath;
-                    if (hasFile(buf,&filepath)) {
+                    char *filepath = getPath(DEFAULT_DIR,buf);
+                    if (isValidPath(filepath)) {
                         printf("Filepath: %s\n",filepath);
                         // send success to client
                         bytes_sent = send(client_fd,"Success",strlen("Success"),0);
@@ -290,7 +235,6 @@ int main(int argc, char** argv) {
                         buf[bytes_recv] = '\0';
 
                         // start file transfer
-                        // assume file size is below 1024 for now
                         if (strcmp(buf,"Start") == 0) {
                             char *file_buf;
                             int filesize = readAll(filepath, &file_buf);
@@ -361,7 +305,6 @@ int main(int argc, char** argv) {
                     buf[bytes_recv] = '\0';
 
                     // client starts file transfer
-                    // assume file is < 1024 bytes for now
                     if (strcmp(buf,"Start") == 0) {
                         // handshaking
                         bytes_sent = send(client_fd,"Handshaking",strlen("Handshaking")+1,0);
@@ -398,6 +341,8 @@ int main(int argc, char** argv) {
                         }
 
                         // convert filename to path
+                        char *path = getPath(DEFAULT_DIR,filename);
+                        /*
                         int size = strlen(DEFAULT_DIR) + strlen(filename) + 2;
                         char *path = malloc(size);
                         memset(path,0,size);
@@ -406,6 +351,7 @@ int main(int argc, char** argv) {
                         ptr[0] = '/';
                         ptr = ptr + 1;
                         strcpy(ptr,filename);
+                        */
                         printf("Path: %s\n",path);
 
                         // write to disk
@@ -424,7 +370,6 @@ int main(int argc, char** argv) {
                         tv.tv_sec = 0;
                         tv.tv_usec = 10000;
 
-
                         // receive file data from client from arbitrarily large message
                         // client must send full file at once (one send() call)
                         while (1) {
@@ -433,6 +378,7 @@ int main(int argc, char** argv) {
                             retval = select(client_fd+1,&rfds,NULL,NULL,&tv);
                             if (retval == -1) {
                                 perror("select()");
+                                exit(1);
                             } else if (retval) {
                                 // continue through loop
                             } else {
