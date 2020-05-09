@@ -1,14 +1,10 @@
-/* File transfer server
-Date: 4/27/20
+/* SSH server
+Date: 5/9/20
 Author: Joshua Eckels
 Class: CSSE432 - networks
 Notes:
-2. Rewrite in Java,C++,Python
-6. Understand exit codes and sighandlers
-7. Understand forking with sockets
 9. IP independence
 10. Use forking to listen on multiple ports
-11. Use exec to allow ssh client->server
 */
 
 #include <sys/types.h>
@@ -29,7 +25,6 @@ Notes:
 
 #include <eckelsjd.h>
 
-#define PORT "3490"
 #define MAXDATASIZE 1024
 #define DEFAULT_DIR "../server_files"
 
@@ -43,25 +38,20 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-// used for cleaning up zombies; I assume this gets called
-// when a process exits with status code 0
+// used for cleaning up zombies
 void sigchld_handler(int s) {
     int saved_errno = errno;
     while(waitpid(-1,NULL,WNOHANG) > 0);
     errno = saved_errno;
 }
 
-/* Main function starts a server
-   Continuously accepts new clients
-*/
 int main(int argc, char** argv) {
     // handle user input
     if (argc != 2) {
         printf("Incorrect usage: ./server <port number>\n");
         exit(1);
     }
-    char* port = (strcmp(argv[1],"0")) ? argv[1]:PORT; // default
-
+    char* port = argv[1];
     // setup server
     int sockfd = setup_server(port);
 
@@ -91,6 +81,8 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        // do some kind of user authentication for ssh server
+
         // retrieve and print client IP address (network to presentation)
         inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr *)&client_addr),
                 s, sizeof s);
@@ -107,14 +99,21 @@ int main(int argc, char** argv) {
             // main server<->client loop
             int bytes_recv;
             int bytes_sent;
-            char buf[MAXDATASIZE+1];
+            int filesize;
+            char **args;
+            char buf[MAXDATASIZE+1]; // server queuing buffer
+            char *stmp = "stmp.txt"; // server temp file
+            char *file_buf;          // server temp file buffer
             while (1) {
-                // get a command from client
+                // get a command line from client
                 if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
                 printf("Command received from client: \"%s\"\n",buf);
+                args = parse_args(buf);
 
-                // handle iWant command
-                if (strcmp(buf,"iWant") == 0) {
+                // handle custom commands
+
+                // user wants file from server
+                if (strcmp(args[0],"scp") == 0) {
                     // confirm connection with client
                     bytes_sent = qsend(client_fd,buf,strlen(buf)+1,0);
 
@@ -160,8 +159,8 @@ int main(int argc, char** argv) {
                     }
                 }
 
-                // handle uTake command
-                else if (strcmp(buf,"uTake") == 0) {
+                // take file from client
+                else if (strcmp(args[0],"ssend") == 0) {
                     // confirm connection with client
                     bytes_sent = qsend(client_fd,buf,strlen(buf)+1,0);
 
@@ -207,13 +206,60 @@ int main(int argc, char** argv) {
 
                 }
 
-                // invalid command
-                else {
-                    // command checking should be handled in client
-                    fprintf(stderr,"Invalid command. Closing client...\n");
-                    break;
+                // change directory
+                else if (strcmp(args[0],"cd")==0) {
+                    if (chdir(args[1])==-1) {
+                        int len = strlen(strerror(errno)) + 2;
+                        char msg[len];
+                        sprintf(msg,"%s\n",strerror(errno));
+                        msg[len-1] = '\0';
+                        bytes_sent = qsend(client_fd,msg,len,0);
+                        //continue
+                    } else {
+                        bytes_sent = qsend(client_fd,"\0",1,0);
+                    }
                 }
-                
+
+                // execute generic linux command
+                else {
+                    int link[2]; // pipe to get output from exec
+                    int exec_pid;  // fork to execute command
+                    if (pipe(link) == -1) {
+                        perror("Pipe failed");
+                        exit(EXIT_FAILURE);
+                    }
+                    if ((exec_pid = fork()) == -1) {
+                        perror("Fork failed");
+                        exit(EXIT_FAILURE);
+                    }
+                    if (exec_pid == 0) {
+                        // link pipe to stdout
+                        dup2(link[1],STDOUT_FILENO);
+                        close(link[0]);
+                        close(link[1]);
+                        execvp(args[0],args);
+                        // send error message to stdout to send to client
+                        printf("%s\n",strerror(errno));
+                        exit(EXIT_SUCCESS);
+                    } else {
+                        // read everything that was sent to stdout
+                        close(link[1]);
+                        char cbuf;
+                        char *line = malloc(sizeof(char));
+                        line[0] = '\0';
+                        int i = 0;
+                        while (read(link[0],&cbuf,sizeof(char)) > 0) {
+                            line = realloc(line, (i+2)*sizeof(char));
+                            line[i] = (char) cbuf;
+                            line[i+1] = '\0';
+                            i++;
+                        }
+                        bytes_sent = qsend(client_fd,line,strlen(line)+1,0);
+                        free(line);
+                        close(link[0]);
+                    }
+                }
+                free_args(args); // cleanup
             }
 
             // close client socket when they disconnect

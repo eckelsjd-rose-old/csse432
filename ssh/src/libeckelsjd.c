@@ -50,6 +50,9 @@ char* getaline() {
 char** parse_args(char* cmdline) {
     char delim[] = " ";
     char **args = malloc(sizeof(char*));
+    char *str_cpy = malloc(strlen(cmdline)+1);
+    memset(str_cpy,0,strlen(cmdline)+1);
+    strcpy(str_cpy,cmdline);
 
     // check allocation
     if (args == NULL) {
@@ -57,8 +60,8 @@ char** parse_args(char* cmdline) {
         exit(1);
     }
 
-    args[0] = "\0"; // signal the end of the array
-    char *ptr = strtok(cmdline, delim); // break up cmdline into tokens
+    args[0] = NULL; // signal the end of the array
+    char *ptr = strtok(str_cpy, delim); // break up cmdline into tokens
     int i = 0;
 
     // break up cmdline into tokens using dynamic memory reallocation
@@ -81,26 +84,26 @@ char** parse_args(char* cmdline) {
 
         // add token to args list
         args[i] = token;
-        args[i+1] = "\0";
+        args[i+1] = NULL;
 
         // iterate
         i++;
         ptr = strtok(NULL, delim);
     }
-
+    free(str_cpy);
     return args;
 }
 
 int num_args(char** args) {
     int num = 0;
-    for (int i = 0; strcmp(args[i],"\0") != 0;i++) {
+    for (int i = 0; args[i] != NULL; i++) {
         num++;
     }
     return num;
 }
 
 void free_args(char** args) {
-    for (int i = 0; strcmp(args[i],"\0") != 0; i++) {
+    for (int i = 0; args[i] != NULL; i++) {
        free(args[i]);
     }
    free(args);
@@ -109,7 +112,6 @@ void free_args(char** args) {
 int readAll(char *path, char **buf) {
     FILE *fd;
     int numbytes;
-
     fd = fopen(path, "r");
     if (fd == NULL) {
         perror("readAll");
@@ -128,7 +130,7 @@ int readAll(char *path, char **buf) {
 
     // copy all text into buffer
     fread(*buf, sizeof(char),numbytes,fd);
-    fclose(fd);
+    //fclose(fd);
     return numbytes;
 }
 
