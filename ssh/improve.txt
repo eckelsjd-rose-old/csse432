@@ -4,8 +4,6 @@
 - multiple ports (web, echo, ssh)
 - Python or GUI
 - Handle HTTP
-- diverse directory for server
-- navigate server (ssh basically)
 - requirements.txt
 - instructions/README
 - port forwarding

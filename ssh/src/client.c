@@ -42,6 +42,10 @@ int main(int argc, char** argv) {
         // get a line from user
         printf("client>");
         line = getaline();
+        if (strlen(line)==0) {
+            free(line);
+            continue;
+        }
 
         // parse client command line arguments
         args = parse_args(line);
@@ -52,45 +56,39 @@ int main(int argc, char** argv) {
 
         // get file from ssh server
         if (strcmp(args[0], "scp") == 0) {
-            // send the name of the command to the server first
-            printf("Requesting command \"%s\" from server...\n",args[0]);
-            bytes_sent = qsend(sockfd,args[0],strlen(args[0])+1,0);
+            // check args
+            if (num_args(args) != 3) {
+                printf("Usage: scp <server_path_to_file> <host_directory>\n");
+                free_args(args);
+                free(line);
+                continue;
+            }
 
-            // confirm connection from server
-            if ( (bytes_recv = qrecv(sockfd, buf, MAXDATASIZE,0)) == 0) { break; }
-            printf("Server confirmed connection: %s\n",buf);
+            if (!isDirectory(args[2])) {
+                printf("\"%s\" is not a valid directory.\n",args[2]);
+                free_args(args);
+                free(line);
+                continue;
+            }
 
-            // send the filename to the server; format as "file.txt"
-            bytes_sent = qsend(sockfd,args[1],strlen(args[1])+1,0);
+            // send command to server
+            bytes_sent = qsend(sockfd,line,strlen(line)+1,0);
 
             // wait for a success or failure message from server
             if ( (bytes_recv = qrecv(sockfd, buf, MAXDATASIZE,0)) == 0) { break; }
-            printf("Locating file on server: %s\n",buf);
 
             // if file was found on server
             if (strcmp(buf,"Success") == 0) {
-                // ask for directory from user
-                printf("Save file to path: ");
-                char *fullpath;
-                char *path = getaline();
-                if (isValidPath(path)) {
-                    // convert to fullpath
-                    fullpath = getPath(path,args[1]);
-                } else {
-                    printf("Invalid path. Using default...\n");
-                    fullpath = getPath(DEFAULT_DIR,args[1]);
-                }
-                free(path);
-                printf("Fullpath: %s\n",fullpath);
-
                 // send message to server requesting file transfer to begin
                 bytes_sent = qsend(sockfd,"Start",strlen("Start")+1,0);
 
+                char *filename = getFilename(args[1]);
+                char *fullpath = getPath(args[2],filename);
                 // save file to disk
-                printf("Writing to disk...\n");
                 int total_bytes = qrecv_big(sockfd, fullpath, buf, MAXDATASIZE);
-                free(fullpath);
                 printf("Write success. Total bytes: %d\n",total_bytes);
+                free(filename);
+                free(fullpath);
                 // continue
             }
 
@@ -104,50 +102,47 @@ int main(int argc, char** argv) {
 
         // send file to server
         } else if (strcmp(args[0], "ssend") == 0) {
-            // send the name of the command to the server first
-            printf("Requesting command \"%s\" from server...\n",args[0]);
-            bytes_sent = qsend(sockfd,args[0],strlen(args[0])+1,0);
-
-            // confirm connection from server
-            if ( (bytes_recv = qrecv(sockfd, buf, MAXDATASIZE,0)) == 0) { break; }
-            printf("Server confirmed connection: %s\n",buf);
-
-            // check if arg[1] is a file on client system
-            if (isValidPath(args[1])) {
-                // tell server message is on its way
-                bytes_sent = qsend(sockfd,"Start",strlen("Start")+1,0);
-            } else {
-                // tell server no message is coming
-                bytes_sent = qsend(sockfd,"No file",strlen("No file")+1,0);
-
-                printf("File \"%s\" not found.\n",args[1]);
+            // check args
+            if (num_args(args) != 3) {
+                printf("Usage: ssend <host_path_to_file> <server_directory>\n");
                 free_args(args);
                 free(line);
                 continue;
             }
 
-            // handshaking
+            if (isDirectory(args[1]) || !isValidPath(args[1])) {
+                printf("\"%s\" is not a valid file to send.\n",args[1]);
+                free_args(args);
+                free(line);
+                continue;
+            }
+
+            // send command to server
+            bytes_sent = qsend(sockfd,line,strlen(line)+1,0);
+
+            // confirm connection from server
             if ( (bytes_recv = qrecv(sockfd, buf, MAXDATASIZE,0)) == 0) { break; }
 
-            // send file name to server
-            char *filename = getFilename(args[1]);
-            bytes_sent = qsend(sockfd,filename,strlen(filename)+1,0);
+            if (strcmp(buf,"Success") == 0) {
+                // send file to server
+                filesize = readAll(args[1],&file_buf);
+                bytes_sent = qsend(sockfd,file_buf,filesize,0);
+                printf("Sent bytes: %d\n",filesize);
+                free(file_buf);
 
-            // handshaking
-            if ( (bytes_recv = qrecv(sockfd, buf, MAXDATASIZE,0)) == 0) { break; }
-
-            // send file to server
-            filesize = readAll(args[1],&file_buf);
-            
-            bytes_sent = qsend(sockfd,file_buf,filesize,0);
-            
-            printf("File \"%s\" sent to server.\n",filename);
-            free(filename);
-            free(file_buf);
+            } else {
+                printf("\"%s\" not found on server.\n",args[2]);
+                free_args(args);
+                free(line);
+                continue;
+            }
             // continue
         } 
         
         // handle generic linux command
+        // only can handle text response from server
+        // any kind of graphical program is off the charts (vim, gedit, zsh, etc.)
+        // also will not receive anything if server is too slow to respond (qrecv_big "bug")
         else {
             bytes_sent = qsend(sockfd,line,strlen(line)+1,0);
             bytes_recv = qrecv_big(sockfd,ctmp,buf,MAXDATASIZE);

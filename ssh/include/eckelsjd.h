@@ -55,6 +55,7 @@ Returns:
     int retval      : 0 if invalid path; 1 if valid path
 */
 int isValidPath(char *path);
+int isDirectory(char *path);
 
 /* Gets the trimmed filename from a valid path. 
    User must free the returned char *filename */

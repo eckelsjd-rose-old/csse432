@@ -4,7 +4,6 @@ Author: Joshua Eckels
 Class: CSSE432 - networks
 Notes:
 9. IP independence
-10. Use forking to listen on multiple ports
 */
 
 #include <sys/types.h>
@@ -26,7 +25,6 @@ Notes:
 #include <eckelsjd.h>
 
 #define MAXDATASIZE 1024
-#define DEFAULT_DIR "../server_files"
 
 // get sockaddr, IPv4 or IPv6
 void *get_in_addr(struct sockaddr *sa) {
@@ -106,6 +104,7 @@ int main(int argc, char** argv) {
             char *file_buf;          // server temp file buffer
             while (1) {
                 // get a command line from client
+                // command limited to MAXDATASIZE bytes
                 if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
                 printf("Command received from client: \"%s\"\n",buf);
                 args = parse_args(buf);
@@ -114,17 +113,8 @@ int main(int argc, char** argv) {
 
                 // user wants file from server
                 if (strcmp(args[0],"scp") == 0) {
-                    // confirm connection with client
-                    bytes_sent = qsend(client_fd,buf,strlen(buf)+1,0);
-
-                    // get the filename from client
-                    if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
-                    printf("Client requesting file: \"%s\"\n",buf);
-
                     // check if server has the file
-                    char *filepath = getPath(DEFAULT_DIR,buf);
-                    if (isValidPath(filepath)) {
-                        printf("Filepath: %s\n",filepath);
+                    if (isValidPath(args[1])) {
                         // send success to client
                         bytes_sent = qsend(client_fd,"Success",strlen("Success")+1,0);
 
@@ -134,15 +124,13 @@ int main(int argc, char** argv) {
                         // start file transfer
                         if (strcmp(buf,"Start") == 0) {
                             char *file_buf;
-                            int filesize = readAll(filepath, &file_buf);
+                            int filesize = readAll(args[1], &file_buf);
 
                             bytes_sent = qsend(client_fd,file_buf,filesize,0);
-                            printf("File transfer to client completed.\n");
                             printf("Sent bytes: %d\n",filesize);
 
                             free(file_buf);
-                            free(filepath);
-                            continue;
+                            // continue
 
                         } else {
                             // something went wrong
@@ -153,65 +141,38 @@ int main(int argc, char** argv) {
                     } else {
                         // file not found on server
                         bytes_sent = qsend(client_fd,"Failure",strlen("Failure")+1,0);
-                        free(filepath);
-                        printf("File: \"%s\" not found.\n",buf);
-                        continue;
+                        // continue
                     }
                 }
 
                 // take file from client
                 else if (strcmp(args[0],"ssend") == 0) {
-                    // confirm connection with client
-                    bytes_sent = qsend(client_fd,buf,strlen(buf)+1,0);
+                    // check for valid directory
+                    if (isDirectory(args[2])) {
+                        bytes_sent = qsend(client_fd,"Success",strlen("Success")+1,0);
 
-                    // receive directions from client
-                    if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
-
-                    // client starts file transfer
-                    if (strcmp(buf,"Start") == 0) {
-                        // handshaking
-                        bytes_sent = qsend(client_fd,"Handshaking",strlen("Handshaking")+1,0);
-
-                        // receive filename from client
-                        char filename[MAXDATASIZE+1];
-                        bytes_recv = qrecv(client_fd, filename, MAXDATASIZE,0);
-                        printf("Server received file \"%s\" from client.\n",filename);
-
-                        // handshaking
-                        bytes_sent = qsend(client_fd,"Handshaking",strlen("Handshaking")+1,0);
-
-                        // convert filename to path
-                        char *path = getPath(DEFAULT_DIR,filename);
-                        printf("Path: %s\n",path);
-
-                        // write to disk
-                        printf("Writing to disk...\n");
-                        int total_bytes = qrecv_big(client_fd, path, buf, MAXDATASIZE);
-                        free(path);
+                        char *filename = getFilename(args[1]);
+                        char *fullpath = getPath(args[2],filename);
+                        // save file to disk
+                        int total_bytes = qrecv_big(client_fd, fullpath, buf, MAXDATASIZE);
                         printf("Write success. Total bytes: %d\n",total_bytes);
-                        continue;
-                    }
+                        free(filename);
+                        free(fullpath);
+                        //continue
 
-                    else if (strcmp(buf,"No file") == 0) {
-                        // client didn't have the file
-                        printf("No file received from client.\n");
-                        continue;
+                    } else {
+                        // invalid directory
+                        bytes_sent = qsend(client_fd,"Failure",strlen("Failure")+1,0);
+                        //continue
                     }
-
-                    else {
-                        // Something went wrong
-                        fprintf(stderr,"Error in file transfer. Closing client...\n");
-                        break;
-                    }
-
                 }
 
                 // change directory
                 else if (strcmp(args[0],"cd")==0) {
                     if (chdir(args[1])==-1) {
-                        int len = strlen(strerror(errno)) + 2;
+                        int len = strlen(strerror(errno)) + strlen(args[0]) + 11;
                         char msg[len];
-                        sprintf(msg,"%s\n",strerror(errno));
+                        sprintf(msg,"%s failed: %s\n",args[0],strerror(errno));
                         msg[len-1] = '\0';
                         bytes_sent = qsend(client_fd,msg,len,0);
                         //continue
@@ -221,8 +182,10 @@ int main(int argc, char** argv) {
                 }
 
                 // execute generic linux command
+                // can only handle text-based commands
+                // graphical programs or other types of data streams not supported
                 else {
-                    int link[2]; // pipe to get output from exec
+                    int link[2]; // pipe to get stdout output from exec
                     int exec_pid;  // fork to execute command
                     if (pipe(link) == -1) {
                         perror("Pipe failed");
@@ -235,25 +198,29 @@ int main(int argc, char** argv) {
                     if (exec_pid == 0) {
                         // link pipe to stdout
                         dup2(link[1],STDOUT_FILENO);
+                        dup2(link[1],STDERR_FILENO);
                         close(link[0]);
-                        close(link[1]);
                         execvp(args[0],args);
                         // send error message to stdout to send to client
-                        printf("%s\n",strerror(errno));
+                        printf("\"%s\" failed: %s\n",args[0],strerror(errno));
                         exit(EXIT_SUCCESS);
                     } else {
-                        // read everything that was sent to stdout
-                        close(link[1]);
+                        //int status;
+                        //waitpid(exec_pid,&status,0);
+
                         char cbuf;
                         char *line = malloc(sizeof(char));
                         line[0] = '\0';
                         int i = 0;
+
+                        close(link[1]);
                         while (read(link[0],&cbuf,sizeof(char)) > 0) {
                             line = realloc(line, (i+2)*sizeof(char));
                             line[i] = (char) cbuf;
                             line[i+1] = '\0';
                             i++;
                         }
+
                         bytes_sent = qsend(client_fd,line,strlen(line)+1,0);
                         free(line);
                         close(link[0]);

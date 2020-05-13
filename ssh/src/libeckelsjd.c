@@ -15,6 +15,7 @@ Include with #include <eckelsjd.h> */
 #include <netdb.h>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <dirent.h>
 
 char* getaline() {
     int ch; // getchar() returns an int
@@ -141,6 +142,15 @@ int isValidPath(char *path) {
     }
     fclose(fd);
     return 1;
+}
+
+int isDirectory(char *path) {
+    DIR *directory = opendir(path);
+    if (directory != NULL) {
+        closedir(directory);
+        return 1;
+    }
+    return 0;
 }
 
 char *getFilename(char *path) {
