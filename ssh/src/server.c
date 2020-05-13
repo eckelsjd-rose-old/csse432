@@ -25,7 +25,7 @@ Notes:
 #include <eckelsjd.h>
 
 #define MAXDATASIZE 1024
-#define KNOWN_HOSTS "users.txt"
+#define KNOWN_HOSTS "../users.txt"
 #define LOGIN_SUCCESS 1 // successful login
 #define LOGIN_FUSR 2    // failed user
 #define LOGIN_FPW 3     // failed password

@@ -30,4 +30,4 @@ $(BIN)/$(P3): $(SRC)/ByteGenerator.c
 	$(CC) $(SRC)/ByteGenerator.c -o $(BIN)/$(P3)
 
 clean:
-	rm $(BIN)/*.o $(BIN)/$(P1) $(BIN)/$(P2) $(BIN)/$(P3)
+	rm $(BIN)/*
