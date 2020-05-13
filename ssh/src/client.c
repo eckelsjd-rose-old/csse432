@@ -12,25 +12,31 @@
 #include <eckelsjd.h>
 
 #define MAXDATASIZE 1024
-#define DEFAULT_DIR "../client_files"
+#define LOGIN_SUCCESS 1
+#define LOGIN_FUSR 2
+#define LOGIN_FPW 3
 
 int main(int argc, char** argv) {
     // get hostname from command line
-    if (argc != 3) {
-        fprintf(stderr,"usage: ./client <hostname> <port number>\n");
+    if (argc != 4) {
+        fprintf(stderr,"usage: ./ssh_client user@hostname -p <port number>\n");
         exit(1);
     }
-    char* hostname = argv[1];
-    char* port = argv[2];
 
-    // do some kind of user authentication for ssh server
+    // separate user and hostname
+    char *cpy = malloc(strlen(argv[1])+1);
+    memset(cpy,0,strlen(argv[1])+1);
+    strcpy(cpy,argv[1]);
+    char *hostname = strtok(cpy,"@");
+    char *user = hostname;
+    hostname = strtok(NULL,"@");
+    char* port = argv[3];
 
     // setup client socket
     int sockfd = setup_client(hostname,port);
 
-    // start CLI for user client program
-    char* line;     // read input 
-    char** args;
+    char* line;                 // read input 
+    char** args;                // cmdline args
     int bytes_recv;
     int bytes_sent;
     int filesize;
@@ -38,9 +44,77 @@ int main(int argc, char** argv) {
     char *ctmp = "ctmp.txt";    // client temp file
     char *file_buf;             // client temp file buffer
 
+    // user authentication
+    printf("Password: ");
+    line = getaline();
+    memset(buf,0,MAXDATASIZE);
+    char *ptr = buf;
+    strncpy(ptr,user,strlen(user));
+    ptr += strlen(user);
+    ptr[0] = ' ';
+    ptr += 1;
+    strcpy(ptr,line);
+    bytes_sent = qsend(sockfd,buf,strlen(buf)+1,0);
+    memset(buf,0,MAXDATASIZE);
+    bytes_recv = qrecv(sockfd,buf,MAXDATASIZE,0);
+    int login = atoi(buf);
+    int flag = 0;
+    switch (login) {
+        case LOGIN_SUCCESS :
+            printf("Login Successful\n");
+            break;
+        case LOGIN_FUSR :
+            printf("Login failed: Invalid user \"%s\"\n", user);
+            flag = 1;
+            break;
+        case LOGIN_FPW :
+            printf("Login failed: Invalid password \"%s\"\n",line);
+            flag = 1;
+            break;
+        default:
+            printf("Invalid\n");
+            exit(1);
+    }
+    memset(line,0,strlen(line)+1);
+    free(line);
+
+    // invalid login
+    if (flag) {
+        close(sockfd);
+        exit(1);
+    }
+
+    // valid login
+    // construct user@hostname prompt
+    int len = strlen(user) + strlen(hostname) + 5;
+    char prompt[len];
+    ptr = prompt;
+    strncpy(ptr,user,strlen(user));
+    ptr += strlen(user);
+    ptr[0] = '@';
+    ptr += 1;
+    strncpy(ptr,hostname,strlen(hostname));
+    ptr += strlen(hostname);
+    ptr[0] = ' ';
+    ptr[1] = ':';
+    ptr[2] = ' ';
+    ptr[3] = '\0';
+
+    // start CLI for user client program
     while (1) {
+        // get working directory from server
+        bytes_sent = qsend(sockfd,"pwd",strlen("pwd")+1,0);
+        bytes_recv = qrecv(sockfd,buf,MAXDATASIZE,0);
+        buf[strlen(buf)-1] = '\0'; //trim newline
+
+        // print prompt and working directory
+        printf("\033[0;32m"); // green
+        printf("%s",prompt);
+        printf("\033[0;36m"); // bold cyan
+        printf("%s $ ",buf);
+        printf("\033[0m"); // default
+
         // get a line from user
-        printf("client>");
         line = getaline();
         if (strlen(line)==0) {
             free(line);

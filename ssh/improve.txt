@@ -7,3 +7,24 @@
 - requirements.txt
 - instructions/README
 - port forwarding
+- encryption
+- limited user access
+- exec server's built in shell and pipe in and out of this (rather than basically write shell from scratch)
+
+Limitations of ssh client and server
+- Security
+    - all user data stored in a simple users.txt file (encryption needed)
+    - any user can login and do whatever they want to the system (user access limitations needed)
+    - any user can delete the binaries running the actual program on both shell and client
+- Error checking
+    - lots of places where mishap user input can screw things up
+- Shell
+    - client and server can only communicate text-based commands
+    - example: ls,cd,file,rm,touch,git,gcc,echo
+    - cannot execute graphical programs with non-text based output
+    - example: vim, gedit, chrome, zsh, bash
+    - also no way currently to check if user just tried to execute non-supported command (will crash)
+    - tab completion and command memory (up-arrow) not supported
+    - basic shell utilities not supported (<, |, etc.)
+    - ssh shell is built from scratch
+

@@ -25,6 +25,10 @@ Notes:
 #include <eckelsjd.h>
 
 #define MAXDATASIZE 1024
+#define KNOWN_HOSTS "users.txt"
+#define LOGIN_SUCCESS 1 // successful login
+#define LOGIN_FUSR 2    // failed user
+#define LOGIN_FPW 3     // failed password
 
 // get sockaddr, IPv4 or IPv6
 void *get_in_addr(struct sockaddr *sa) {
@@ -41,6 +45,33 @@ void sigchld_handler(int s) {
     int saved_errno = errno;
     while(waitpid(-1,NULL,WNOHANG) > 0);
     errno = saved_errno;
+}
+
+// validate user login against users.txt
+int validLogin(char *user, char *password) {
+    FILE *fd = fopen(KNOWN_HOSTS,"r");
+    if (fd == NULL) {
+        perror("fopen");
+        exit(1);
+    }
+    char buf[MAXDATASIZE];
+    memset(buf,0,MAXDATASIZE);
+    while ( fgets(buf,MAXDATASIZE,fd) != NULL ) {
+        buf[strlen(buf)-1] = '\0'; // trim newline
+        char *curr_user = strtok(buf," ");
+        if (strcmp(user,curr_user) == 0) {
+            char *curr_pw = strtok(NULL," ");
+            if (strcmp(password,curr_pw) == 0) {
+                fclose(fd);
+                return LOGIN_SUCCESS;
+            } else {
+                fclose(fd);
+                return LOGIN_FPW;
+            }
+        }
+        memset(buf,0,MAXDATASIZE);
+    }
+    return LOGIN_FUSR;
 }
 
 int main(int argc, char** argv) {
@@ -79,8 +110,6 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        // do some kind of user authentication for ssh server
-
         // retrieve and print client IP address (network to presentation)
         inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr *)&client_addr),
                 s, sizeof s);
@@ -94,15 +123,77 @@ int main(int argc, char** argv) {
         } else if (pid == 0) { // child will handle the client
             close(sockfd); // child doesn't need server listener anymore
 
-            // main server<->client loop
             int bytes_recv;
             int bytes_sent;
             int filesize;
+            int i;
             char **args;
             char buf[MAXDATASIZE+1]; // server queuing buffer
             char *stmp = "stmp.txt"; // server temp file
             char *file_buf;          // server temp file buffer
-            while (1) {
+
+            // user authentication
+            if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break;}
+            args = parse_args(buf);
+            int login = validLogin(args[0],args[1]);
+            sprintf(buf,"%d",login);
+            bytes_sent = qsend(client_fd,buf,strlen(buf)+1,0);
+            int flag = 0;
+            switch (login) {
+                case LOGIN_SUCCESS :
+                    break;
+                case LOGIN_FUSR :
+                    flag = 1;
+                    break;
+                case LOGIN_FPW :
+                    flag = 1;
+                    break;
+                default :
+                    printf("Invalid\n");
+                    exit(1);
+            }
+            free_args(args);
+
+            // send current working directory to user
+            bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
+            int pwd_pid;
+            int pwd_pipe[2];
+            if (pipe(pwd_pipe) == -1) {
+                perror("Pipe failed");
+                exit(EXIT_FAILURE);
+            }
+            if ((pwd_pid = fork()) < 0) {
+                perror("server fork");
+                exit(EXIT_FAILURE);
+            } else if (pwd_pid == 0) {
+                // link to stdout
+                dup2(pwd_pipe[1],STDOUT_FILENO);
+                dup2(pwd_pipe[1],STDERR_FILENO);
+                close(pwd_pipe[0]);
+                execlp(buf,buf,NULL);
+                printf("\"%s\" failed: %s\n",buf,strerror(errno));
+                exit(EXIT_SUCCESS);
+            } else {
+                waitpid(pwd_pid,NULL,0);
+                char pwd_cbuf;
+                char *pwd_out = malloc(sizeof(char));
+                pwd_out[0] ='\0';
+                i = 0;
+
+                close(pwd_pipe[1]);
+                while (read(pwd_pipe[0],&pwd_cbuf,sizeof(char)) > 0) {
+                    pwd_out = realloc(pwd_out, (i+2)*sizeof(char));
+                    pwd_out[i] = (char) pwd_cbuf;
+                    pwd_out[i+1] = '\0';
+                    i++;
+                }
+                bytes_sent = qsend(client_fd,pwd_out,strlen(pwd_out)+1,0);
+                free(pwd_out);
+                close(pwd_pipe[0]);
+            }
+
+            // main server<->client loop
+            while (!flag) {
                 // get a command line from client
                 // command limited to MAXDATASIZE bytes
                 if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
@@ -123,9 +214,7 @@ int main(int argc, char** argv) {
 
                         // start file transfer
                         if (strcmp(buf,"Start") == 0) {
-                            char *file_buf;
-                            int filesize = readAll(args[1], &file_buf);
-
+                            filesize = readAll(args[1], &file_buf);
                             bytes_sent = qsend(client_fd,file_buf,filesize,0);
                             printf("Sent bytes: %d\n",filesize);
 
@@ -211,7 +300,7 @@ int main(int argc, char** argv) {
                         char cbuf;
                         char *line = malloc(sizeof(char));
                         line[0] = '\0';
-                        int i = 0;
+                        i = 0;
 
                         close(link[1]);
                         while (read(link[0],&cbuf,sizeof(char)) > 0) {
