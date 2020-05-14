@@ -154,49 +154,53 @@ int main(int argc, char** argv) {
             }
             free_args(args);
 
-            // send current working directory to user
-            bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
-            int pwd_pid;
-            int pwd_pipe[2];
-            if (pipe(pwd_pipe) == -1) {
-                perror("Pipe failed");
-                exit(EXIT_FAILURE);
-            }
-            if ((pwd_pid = fork()) < 0) {
-                perror("server fork");
-                exit(EXIT_FAILURE);
-            } else if (pwd_pid == 0) {
-                // link to stdout
-                dup2(pwd_pipe[1],STDOUT_FILENO);
-                dup2(pwd_pipe[1],STDERR_FILENO);
-                close(pwd_pipe[0]);
-                execlp(buf,buf,NULL);
-                printf("\"%s\" failed: %s\n",buf,strerror(errno));
-                exit(EXIT_SUCCESS);
-            } else {
-                waitpid(pwd_pid,NULL,0);
-                char pwd_cbuf;
-                char *pwd_out = malloc(sizeof(char));
-                pwd_out[0] ='\0';
-                i = 0;
-
-                close(pwd_pipe[1]);
-                while (read(pwd_pipe[0],&pwd_cbuf,sizeof(char)) > 0) {
-                    pwd_out = realloc(pwd_out, (i+2)*sizeof(char));
-                    pwd_out[i] = (char) pwd_cbuf;
-                    pwd_out[i+1] = '\0';
-                    i++;
-                }
-                bytes_sent = qsend(client_fd,pwd_out,strlen(pwd_out)+1,0);
-                free(pwd_out);
-                close(pwd_pipe[0]);
-            }
-
             // main server<->client loop
             while (!flag) {
+                int pwd_pid;
+                int pwd_pipe[2];
+                char pwd_cbuf;
+                char *pwd_out;
+                // send current working directory to user
+                bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
+                if (pipe(pwd_pipe) == -1) {
+                    perror("Pipe failed");
+                    exit(EXIT_FAILURE);
+                }
+                if ((pwd_pid = fork()) < 0) {
+                    perror("server fork");
+                    exit(EXIT_FAILURE);
+                } else if (pwd_pid == 0) {
+                    // link to stdout
+                    dup2(pwd_pipe[1],STDOUT_FILENO);
+                    dup2(pwd_pipe[1],STDERR_FILENO);
+                    close(pwd_pipe[0]);
+                    execlp(buf,buf,NULL);
+                    printf("\"%s\" failed: %s\n",buf,strerror(errno));
+                    exit(EXIT_SUCCESS);
+                } else {
+                    waitpid(pwd_pid,NULL,0);
+                    pwd_out = malloc(sizeof(char));
+                    pwd_out[0] ='\0';
+                    i = 0;
+
+                    close(pwd_pipe[1]);
+                    while (read(pwd_pipe[0],&pwd_cbuf,sizeof(char)) > 0) {
+                        pwd_out = realloc(pwd_out, (i+2)*sizeof(char));
+                        pwd_out[i] = (char) pwd_cbuf;
+                        pwd_out[i+1] = '\0';
+                        i++;
+                    }
+                    bytes_sent = qsend(client_fd,pwd_out,strlen(pwd_out)+1,0);
+                    free(pwd_out);
+                    close(pwd_pipe[0]);
+                }
+
                 // get a command line from client
                 // command limited to MAXDATASIZE bytes
                 if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
+                if (strcmp(buf,"Null") == 0) {
+                    continue; // if client enters a blank line
+                }
                 printf("Command received from client: \"%s\"\n",buf);
                 args = parse_args(buf);
 
