@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
                 // command limited to MAXDATASIZE bytes
                 if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
                 if (strcmp(buf,"Null") == 0) {
-                    continue; // if client enters a blank line
+                    continue; // if client enters a blank line or fails on custom command
                 }
                 printf("Command received from client: \"%s\"\n",buf);
                 args = parse_args(buf);
@@ -219,6 +219,8 @@ int main(int argc, char** argv) {
                         // start file transfer
                         if (strcmp(buf,"Start") == 0) {
                             filesize = readAll(args[1], &file_buf);
+                            bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0); // handshaking
+                            bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
                             bytes_sent = qsend(client_fd,file_buf,filesize,0);
                             printf("Sent bytes: %d\n",filesize);
 
@@ -247,8 +249,12 @@ int main(int argc, char** argv) {
                         char *filename = getFilename(args[1]);
                         char *fullpath = getPath(args[2],filename);
                         // save file to disk
+                        bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0); // handshaking
+                        bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0);
                         int total_bytes = qrecv_big(client_fd, fullpath, buf, MAXDATASIZE);
                         printf("Write success. Total bytes: %d\n",total_bytes);
+                        // tell client write is done
+                        bytes_sent = qsend(client_fd,"Finished",strlen("Finished")+1,0);
                         free(filename);
                         free(fullpath);
                         //continue
@@ -267,9 +273,18 @@ int main(int argc, char** argv) {
                         char msg[len];
                         sprintf(msg,"%s failed: %s\n",args[0],strerror(errno));
                         msg[len-1] = '\0';
+                        
+                        // handshaking
+                        bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0);
+                        bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
+
                         bytes_sent = qsend(client_fd,msg,len,0);
                         //continue
                     } else {
+                        // handshaking 
+                        bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0);
+                        bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
+
                         bytes_sent = qsend(client_fd,"\0",1,0);
                     }
                 }
@@ -313,6 +328,10 @@ int main(int argc, char** argv) {
                             line[i+1] = '\0';
                             i++;
                         }
+
+                        // handshaking
+                        bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0);
+                        bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
 
                         bytes_sent = qsend(client_fd,line,strlen(line)+1,0);
                         free(line);
