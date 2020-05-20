@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
                 // command limited to MAXDATASIZE bytes
                 if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
                 if (strcmp(buf,"Null") == 0) {
-                    continue; // if client enters a blank line
+                    continue; // if client enters a blank line or fails on custom command
                 }
                 printf("Command received from client: \"%s\"\n",buf);
                 args = parse_args(buf);
@@ -249,6 +249,8 @@ int main(int argc, char** argv) {
                         // save file to disk
                         int total_bytes = qrecv_big(client_fd, fullpath, buf, MAXDATASIZE);
                         printf("Write success. Total bytes: %d\n",total_bytes);
+                        // tell client write is done
+                        bytes_sent = qsend(client_fd,"Finished",strlen("Finished")+1,0);
                         free(filename);
                         free(fullpath);
                         //continue

@@ -349,16 +349,19 @@ int qrecv_big(int sockfd, char *path, char *buf, int datasize) {
     }
 
     // block until data is visible on socket
-    fd_set rfds;
-    struct timeval tv;
-    int retval;
-    tv.tv_sec = 0;
-    tv.tv_usec = 100000;
 
     // receive arbitrarily large file data
     // client must send full file at once (one send() call)
     int total_bytes = 0;
+//    struct timeval start;
+//   gettimeofday(&start,NULL);
+//    printf("qrecv start: %lu.%lu\n",start.tv_sec,start.tv_usec);
     while (1) {
+        fd_set rfds;
+        struct timeval tv;
+        int retval;
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000;
         FD_ZERO(&rfds);
         FD_SET(sockfd,&rfds);
         retval = select(sockfd+1,&rfds,NULL,NULL,&tv);
@@ -369,6 +372,9 @@ int qrecv_big(int sockfd, char *path, char *buf, int datasize) {
             // continue through loop
         } else {
             // done reading
+//            struct timeval end;
+//            gettimeofday(&end,NULL);
+//            printf("qrecv end: %lu.%lu\n",end.tv_sec,end.tv_usec);
             break;
         }
 

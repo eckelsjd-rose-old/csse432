@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <sys/time.h>
 
 #include <eckelsjd.h>
 
@@ -103,6 +104,12 @@ int main(int argc, char** argv) {
     // start CLI for user client program
     while (1) {
         // get working directory from server
+//        struct timeval start, end;
+//        gettimeofday(&start,NULL);
+//        printf("Start: %lu.%lu\n",start.tv_sec,start.tv_usec);
+        usleep(100000); // aid in small race conditions when client continues
+//        gettimeofday(&end,NULL);
+//       printf("End: %lu.%lu\n",end.tv_sec,end.tv_usec);
         bytes_sent = qsend(sockfd,"pwd",strlen("pwd")+1,0);
         bytes_recv = qrecv(sockfd,buf,MAXDATASIZE,0);
         buf[strlen(buf)-1] = '\0'; //trim newline
@@ -117,6 +124,7 @@ int main(int argc, char** argv) {
         // get a line from user
         line = getaline();
         if (strlen(line)==0) {
+            bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
             free(line);
             continue;
         }
@@ -133,6 +141,7 @@ int main(int argc, char** argv) {
             // check args
             if (num_args(args) != 3) {
                 printf("Usage: scp <server_path_to_file> <host_directory>\n");
+                bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
                 free_args(args);
                 free(line);
                 continue;
@@ -140,6 +149,7 @@ int main(int argc, char** argv) {
 
             if (!isDirectory(args[2])) {
                 printf("\"%s\" is not a valid directory.\n",args[2]);
+                bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
                 free_args(args);
                 free(line);
                 continue;
@@ -179,6 +189,7 @@ int main(int argc, char** argv) {
             // check args
             if (num_args(args) != 3) {
                 printf("Usage: ssend <host_path_to_file> <server_directory>\n");
+                bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
                 free_args(args);
                 free(line);
                 continue;
@@ -186,6 +197,7 @@ int main(int argc, char** argv) {
 
             if (isDirectory(args[1]) || !isValidPath(args[1])) {
                 printf("\"%s\" is not a valid file to send.\n",args[1]);
+                bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
                 free_args(args);
                 free(line);
                 continue;
@@ -202,10 +214,12 @@ int main(int argc, char** argv) {
                 filesize = readAll(args[1],&file_buf);
                 bytes_sent = qsend(sockfd,file_buf,filesize,0);
                 printf("Sent bytes: %d\n",filesize);
+                // wait for server to finish receiving to prevent race conditions
+                bytes_recv = qrecv(sockfd,buf,MAXDATASIZE,0);
                 free(file_buf);
 
             } else {
-                printf("\"%s\" not found on server.\n",args[2]);
+                printf("\"%s\" directory not found on server.\n",args[2]);
                 free_args(args);
                 free(line);
                 continue;
