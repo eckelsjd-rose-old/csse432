@@ -362,6 +362,7 @@ int qrecv_big(int sockfd, char *path, char *buf, int datasize) {
         int retval;
         tv.tv_sec = 0;
         tv.tv_usec = 80000;
+        tv.tv_usec = 100000;
         FD_ZERO(&rfds);
         FD_SET(sockfd,&rfds);
         retval = select(sockfd+1,&rfds,NULL,NULL,&tv);
