@@ -341,7 +341,7 @@ int qsend(int sockfd, char *buf, int size, int flags) {
     return bytes_sent;
 }
 
-int qrecv_big(int sockfd, char *path, char *buf, int datasize) {
+int qrecv_big(int sockfd, char *path, char *buf, int datasize,struct timeval *timeout) {
     FILE *fd = fopen(path, "a");
     if (fd == NULL) {
         perror("qrecv_big");
@@ -360,9 +360,8 @@ int qrecv_big(int sockfd, char *path, char *buf, int datasize) {
         fd_set rfds;
         struct timeval tv;
         int retval;
-        tv.tv_sec = 0;
-        tv.tv_usec = 80000;
-        tv.tv_usec = 100000;
+        tv.tv_sec = timeout->tv_sec;
+        tv.tv_usec = timeout->tv_usec;
         FD_ZERO(&rfds);
         FD_SET(sockfd,&rfds);
         retval = select(sockfd+1,&rfds,NULL,NULL,&tv);

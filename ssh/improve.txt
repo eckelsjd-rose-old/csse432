@@ -27,4 +27,9 @@ Limitations of ssh client and server
     - tab completion and command memory (up-arrow) not supported
     - basic shell utilities not supported (<, |, etc.)
     - ssh shell is built from scratch
+- Buffer size / timing
+    - errors occur when receiving large files; recv function times out
+    - need to find better way to receive large files, or detect when it times out vs. when
+      it actually finished receiving
+    - this unhandled error causes send/recv communication to breakdown after timeout
 

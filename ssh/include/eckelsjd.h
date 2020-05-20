@@ -102,7 +102,8 @@ Parameters:
     char *path   : path to file to write to
     char *buf    : preallocated buffer to recv data to
     int datasize : chunksize of data recv'd to buffer
+    struct timeval *timeout
 Return:
     int total_bytes : total number of bytes written
 */
-int qrecv_big(int sockfd, char *path, char *buf, int datasize);
+int qrecv_big(int sockfd, char *path, char *buf, int datasize, struct timeval *timeout);

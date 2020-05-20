@@ -13,9 +13,12 @@
 #include <eckelsjd.h>
 
 #define MAXDATASIZE 1024
+#define MAXFILESIZE 52428800 // 50 MiB
 #define LOGIN_SUCCESS 1
 #define LOGIN_FUSR 2
 #define LOGIN_FPW 3
+#define SUCCESS "Success"
+#define FAILURE "Failure"
 
 int main(int argc, char** argv) {
     // get hostname from command line
@@ -44,6 +47,7 @@ int main(int argc, char** argv) {
     char buf[MAXDATASIZE+1];    // client queuing buffer
     char *ctmp = "ctmp.txt";    // client temp file
     char *file_buf;             // client temp file buffer
+    struct timeval timeout;
 
     // user authentication
     printf("Password: ");
@@ -107,7 +111,7 @@ int main(int argc, char** argv) {
 //        struct timeval start, end;
 //        gettimeofday(&start,NULL);
 //        printf("Start: %lu.%lu\n",start.tv_sec,start.tv_usec);
-        usleep(50000); // aid in small race conditions when client continues
+        usleep(100000); // aid in small race conditions when client continues
 //        gettimeofday(&end,NULL);
 //       printf("End: %lu.%lu\n",end.tv_sec,end.tv_usec);
         bytes_sent = qsend(sockfd,"pwd",strlen("pwd")+1,0);
@@ -124,7 +128,7 @@ int main(int argc, char** argv) {
         // get a line from user
         line = getaline();
         if (strlen(line)==0) {
-            bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
+            bytes_sent = qsend(sockfd,FAILURE,strlen(FAILURE)+1,0);
             free(line);
             continue;
         }
@@ -141,7 +145,7 @@ int main(int argc, char** argv) {
             // check args
             if (num_args(args) != 3) {
                 printf("Usage: scp <server_path_to_file> <host_directory>\n");
-                bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
+                bytes_sent = qsend(sockfd,FAILURE,strlen(FAILURE)+1,0);
                 free_args(args);
                 free(line);
                 continue;
@@ -149,7 +153,7 @@ int main(int argc, char** argv) {
 
             if (!isDirectory(args[2])) {
                 printf("\"%s\" is not a valid directory.\n",args[2]);
-                bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
+                bytes_sent = qsend(sockfd,FAILURE,strlen(FAILURE)+1,0);
                 free_args(args);
                 free(line);
                 continue;
@@ -162,17 +166,37 @@ int main(int argc, char** argv) {
             if ( (bytes_recv = qrecv(sockfd, buf, MAXDATASIZE,0)) == 0) { break; }
 
             // if file was found on server
-            if (strcmp(buf,"Success") == 0) {
+            if (strcmp(buf,SUCCESS) == 0) {
                 // send message to server requesting file transfer to begin
-                bytes_sent = qsend(sockfd,"Start",strlen("Start")+1,0);
+                bytes_sent = qsend(sockfd,SUCCESS,strlen(SUCCESS)+1,0);
 
+                // save file to disk
+                bytes_recv = qrecv(sockfd,buf,MAXDATASIZE,0); // get filesize
+                filesize = atoi(buf);
+                if (filesize > MAXFILESIZE) {
+                    printf("File size > 50MiB. Transfer canceled\n");
+                    bytes_sent = qsend(sockfd,FAILURE,strlen(FAILURE)+1,0);
+                    free_args(args);
+                    free(line);
+                    continue;
+                }
                 char *filename = getFilename(args[1]);
                 char *fullpath = getPath(args[2],filename);
-                // save file to disk
-                bytes_recv = qrecv(sockfd,buf,MAXDATASIZE,0); // handshaking
-                bytes_sent = qsend(sockfd,"Ready",strlen("Ready")+1,0);
+                bytes_sent = qsend(sockfd,SUCCESS,strlen(SUCCESS)+1,0);
 
-                int total_bytes = qrecv_big(sockfd, fullpath, buf, MAXDATASIZE);
+                timeout.tv_sec = 1;
+                timeout.tv_usec = 0;
+                int total_bytes = qrecv_big(sockfd, fullpath, buf, MAXDATASIZE,&timeout);
+                // timeout
+                if (total_bytes != filesize) {
+                    bytes_sent = qsend(sockfd,FAILURE,strlen(FAILURE)+1,0);
+                    remove(fullpath);
+                    free(filename);
+                    free(fullpath);
+                    printf("File transfer timed-out. Closing your connection...\n");
+                    break;
+                }
+                bytes_sent = qsend(sockfd,SUCCESS,strlen(SUCCESS)+1,0);
                 printf("Write success. Total bytes: %d\n",total_bytes);
                 free(filename);
                 free(fullpath);
@@ -192,7 +216,7 @@ int main(int argc, char** argv) {
             // check args
             if (num_args(args) != 3) {
                 printf("Usage: ssend <host_path_to_file> <server_directory>\n");
-                bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
+                bytes_sent = qsend(sockfd,FAILURE,strlen(FAILURE)+1,0);
                 free_args(args);
                 free(line);
                 continue;
@@ -200,7 +224,7 @@ int main(int argc, char** argv) {
 
             if (isDirectory(args[1]) || !isValidPath(args[1])) {
                 printf("\"%s\" is not a valid file to send.\n",args[1]);
-                bytes_sent = qsend(sockfd,"Null",strlen("Null")+1,0);
+                bytes_sent = qsend(sockfd,FAILURE,strlen(FAILURE)+1,0);
                 free_args(args);
                 free(line);
                 continue;
@@ -212,17 +236,32 @@ int main(int argc, char** argv) {
             // confirm connection from server
             if ( (bytes_recv = qrecv(sockfd, buf, MAXDATASIZE,0)) == 0) { break; }
 
-            if (strcmp(buf,"Success") == 0) {
+            if (strcmp(buf,SUCCESS) == 0) {
                 // send file to server
                 filesize = readAll(args[1],&file_buf);
-                bytes_sent = qsend(sockfd,"Ready",strlen("Ready")+1,0); // handshaking
+                memset(buf,0,MAXDATASIZE);
+                sprintf(buf,"%d",filesize);
+                bytes_sent = qsend(sockfd,buf,strlen(buf)+1,0); // send filesize
                 bytes_recv = qrecv(sockfd,buf,MAXDATASIZE,0);
 
+                if (strcmp(buf,FAILURE)==0) {
+                    free_args(args); // file was too big
+                    free(line);
+                    free(file_buf);
+                    continue;
+                }
                 bytes_sent = qsend(sockfd,file_buf,filesize,0);
                 printf("Sent bytes: %d\n",filesize);
-                // wait for server to finish receiving to prevent race conditions
                 bytes_recv = qrecv(sockfd,buf,MAXDATASIZE,0);
-                free(file_buf);
+                if (strcmp(buf,FAILURE)==0) {
+                    free(file_buf); // server timed-out; close-connection
+                    printf("File transfer timed-out. Closing your connection...\n");
+                    break;
+                } else {
+                    // server successfully received file
+                    free(file_buf);
+                    // continue
+                }
 
             } else {
                 printf("\"%s\" directory not found on server.\n",args[2]);
@@ -241,9 +280,12 @@ int main(int argc, char** argv) {
             bytes_sent = qsend(sockfd,line,strlen(line)+1,0);
 
             bytes_recv = qrecv(sockfd,buf,MAXDATASIZE,0); // handshaking
-            bytes_sent = qsend(sockfd,"Ready",strlen("Ready")+1,0);
+            bytes_sent = qsend(sockfd,SUCCESS,strlen(SUCCESS)+1,0);
 
-            bytes_recv = qrecv_big(sockfd,ctmp,buf,MAXDATASIZE);
+            timeout.tv_sec = 0;
+            timeout.tv_usec = 100000;
+            // assume no file overflow or timeout issues here
+            bytes_recv = qrecv_big(sockfd,ctmp,buf,MAXDATASIZE,&timeout);
             filesize = readAll(ctmp,&file_buf);
             printf("%s",file_buf);
             free(file_buf);

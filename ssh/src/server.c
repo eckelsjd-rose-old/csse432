@@ -25,10 +25,13 @@ Notes:
 #include <eckelsjd.h>
 
 #define MAXDATASIZE 1024
+#define MAXFILESIZE 52428800 // 50 MiB
 #define KNOWN_HOSTS "../users.txt"
 #define LOGIN_SUCCESS 1 // successful login
 #define LOGIN_FUSR 2    // failed user
 #define LOGIN_FPW 3     // failed password
+#define SUCCESS "Success"
+#define FAILURE "Failure"
 
 // get sockaddr, IPv4 or IPv6
 void *get_in_addr(struct sockaddr *sa) {
@@ -131,6 +134,7 @@ int main(int argc, char** argv) {
             char buf[MAXDATASIZE+1]; // server queuing buffer
             char *stmp = "stmp.txt"; // server temp file
             char *file_buf;          // server temp file buffer
+            struct timeval timeout;
 
             // user authentication
             if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break;}
@@ -198,7 +202,7 @@ int main(int argc, char** argv) {
                 // get a command line from client
                 // command limited to MAXDATASIZE bytes
                 if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
-                if (strcmp(buf,"Null") == 0) {
+                if (strcmp(buf,FAILURE) == 0) {
                     continue; // if client enters a blank line or fails on custom command
                 }
                 printf("Command received from client: \"%s\"\n",buf);
@@ -211,21 +215,35 @@ int main(int argc, char** argv) {
                     // check if server has the file
                     if (isValidPath(args[1])) {
                         // send success to client
-                        bytes_sent = qsend(client_fd,"Success",strlen("Success")+1,0);
+                        bytes_sent = qsend(client_fd,SUCCESS,strlen(SUCCESS)+1,0);
 
                         // wait for client to request transfer to begin
                         if ( (bytes_recv = qrecv(client_fd, buf, MAXDATASIZE,0)) == 0) { break; }
 
                         // start file transfer
-                        if (strcmp(buf,"Start") == 0) {
+                        if (strcmp(buf,SUCCESS) == 0) {
                             filesize = readAll(args[1], &file_buf);
-                            bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0); // handshaking
+                            memset(buf,0,MAXDATASIZE);
+                            sprintf(buf,"%d",filesize); // send filesize
+                            bytes_sent = qsend(client_fd,buf,strlen(buf)+1,0); 
                             bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
+
+                            if (strcmp(buf,FAILURE)==0) {
+                                free_args(args); // file was too big
+                                free(file_buf);
+                                continue;
+                            }
                             bytes_sent = qsend(client_fd,file_buf,filesize,0);
                             printf("Sent bytes: %d\n",filesize);
-
-                            free(file_buf);
-                            // continue
+                            bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
+                            if (strcmp(buf,FAILURE)==0) {
+                                free(file_buf); // client timed-out; close connection
+                                free_args(args);
+                                break;
+                            } else {
+                                free(file_buf);
+                                // continue
+                            }
 
                         } else {
                             // something went wrong
@@ -235,7 +253,7 @@ int main(int argc, char** argv) {
 
                     } else {
                         // file not found on server
-                        bytes_sent = qsend(client_fd,"Failure",strlen("Failure")+1,0);
+                        bytes_sent = qsend(client_fd,FAILURE,strlen(FAILURE)+1,0);
                         // continue
                     }
                 }
@@ -244,24 +262,41 @@ int main(int argc, char** argv) {
                 else if (strcmp(args[0],"ssend") == 0) {
                     // check for valid directory
                     if (isDirectory(args[2])) {
-                        bytes_sent = qsend(client_fd,"Success",strlen("Success")+1,0);
+                        bytes_sent = qsend(client_fd,SUCCESS,strlen(SUCCESS)+1,0);
 
+                        bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0); // get filesize
+                        filesize = atoi(buf);
+                        if (filesize > MAXFILESIZE) {
+                            bytes_sent = qsend(client_fd,FAILURE,strlen(FAILURE)+1,0);
+                            free_args(args);
+                            continue; // file size too big to send
+                        }
                         char *filename = getFilename(args[1]);
                         char *fullpath = getPath(args[2],filename);
+                        bytes_sent = qsend(client_fd,SUCCESS,strlen(SUCCESS)+1,0);
+
                         // save file to disk
-                        bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0); // handshaking
-                        bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0);
-                        int total_bytes = qrecv_big(client_fd, fullpath, buf, MAXDATASIZE);
+                        timeout.tv_sec = 1;
+                        timeout.tv_usec = 0;
+                        int total_bytes = qrecv_big(client_fd, fullpath, buf, MAXDATASIZE,&timeout);
+                        // timeout
+                        if (total_bytes != filesize) {
+                            bytes_sent = qsend(client_fd,FAILURE,strlen(FAILURE)+1,0);
+                            remove(fullpath);
+                            free(filename);
+                            free(fullpath);
+                            free_args(args); 
+                            break; // close connection on time-out
+                        }
+                        bytes_sent = qsend(client_fd,SUCCESS,strlen(SUCCESS)+1,0);
                         printf("Write success. Total bytes: %d\n",total_bytes);
-                        // tell client write is done
-                        bytes_sent = qsend(client_fd,"Finished",strlen("Finished")+1,0);
                         free(filename);
                         free(fullpath);
                         //continue
 
                     } else {
                         // invalid directory
-                        bytes_sent = qsend(client_fd,"Failure",strlen("Failure")+1,0);
+                        bytes_sent = qsend(client_fd,FAILURE,strlen(FAILURE)+1,0);
                         //continue
                     }
                 }
@@ -275,14 +310,14 @@ int main(int argc, char** argv) {
                         msg[len-1] = '\0';
                         
                         // handshaking
-                        bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0);
+                        bytes_sent = qsend(client_fd,SUCCESS,strlen(SUCCESS)+1,0);
                         bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
 
                         bytes_sent = qsend(client_fd,msg,len,0);
                         //continue
                     } else {
                         // handshaking 
-                        bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0);
+                        bytes_sent = qsend(client_fd,SUCCESS,strlen(SUCCESS)+1,0);
                         bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
 
                         bytes_sent = qsend(client_fd,"\0",1,0);
@@ -330,9 +365,10 @@ int main(int argc, char** argv) {
                         }
 
                         // handshaking
-                        bytes_sent = qsend(client_fd,"Ready",strlen("Ready")+1,0);
+                        bytes_sent = qsend(client_fd,SUCCESS,strlen(SUCCESS)+1,0);
                         bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0);
 
+                        // assume no file overflow or timeout issues here; just small commands
                         bytes_sent = qsend(client_fd,line,strlen(line)+1,0);
                         free(line);
                         close(link[0]);
