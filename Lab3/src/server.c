@@ -28,10 +28,10 @@ Notes:
 #include <sys/time.h>
 
 #include <eckelsjd.h>
+#include <proxy_parse.h>
 
 #define PORT "3490"
-#define MAXDATASIZE 1024
-#define DEFAULT_DIR "../server_files"
+#define MAXDATASIZE 131072 // 1/8 MegaByte
 
 // get sockaddr, IPv4 or IPv6
 void *get_in_addr(struct sockaddr *sa) {
@@ -108,37 +108,68 @@ int main(int argc, char** argv) {
             int bytes_recv;
             int bytes_sent;
             char buf[MAXDATASIZE+1];
+            struct ParsedRequest *req = ParsedRequest_create();
 
             // receive message from client
             // might need to fix to receive more bytes
             if ( (bytes_recv = qrecv(client_fd,buf,MAXDATASIZE,0)) == 0) {break; }
+            printf("%s",buf);
             
             // check for correct HTTP message
-            printf("%s\n",buf);
+            int ret = ParsedRequest_parse(req,buf,strlen(buf));
+            if (ret == -1) {
+                // Bad Request 400
+                memset(buf,0,MAXDATASIZE);
+                sprintf(buf,"HTTP/1.1 400 Bad Request\r\n\r\n");
+                bytes_sent = qsend(client_fd,buf,strlen(buf),0);
+                close(client_fd);
+                exit(0);
 
-            // if not, form and send error message, then exit
+            } else if (ret == -2) {
+                // Not implemented 501
+                memset(buf,0,MAXDATASIZE);
+                sprintf(buf,"HTTP/1.1 501 Not Implemented\r\n\r\n");
+                bytes_sent = qsend(client_fd,buf,strlen(buf),0);
+                close(client_fd);
+                exit(0);
+            }
 
-            // if correctly formatted, parse message for
-            // requested host, port, and URL
-            char *hostname = "www.google.com";
-            char *remote_port = "80";
+            if (req->port == NULL) {
+                req->port = "80"; // default
+            }
+            
+            char *hostname = req->host;
+            char *path = req->path;
 
-            // form an HTTP message to send to remote host
-            char *msg = "GET / HTTP/1.0\r\nHost: www.google.com\r\nConnection: close\r\n\r\n";
+            // make modifications to client's HTTP request
+            ParsedHeader_set(req,"Host",hostname);
+            ParsedHeader_set(req,"Connection","close");
+
+            int rlen = ParsedRequest_totalLen(req);
+            char *rsp = (char *) malloc(rlen+1);
+            if (ParsedRequest_unparse(req,rsp,rlen,1) < 0) {
+                printf("unparse failed\n");
+                close(client_fd);
+                exit(1);
+            }
+            rsp[rlen]='\0';
+
+            printf("Send to server:\n");
+            printf("%s",rsp);
 
             // create client connection with host and receive one HTTP response
-            int remote_fd = setup_client(hostname,remote_port);
+            int remote_fd = setup_client(hostname,req->port);
 
-            bytes_sent = qsend(remote_fd,msg,strlen(msg),0);
+            bytes_sent = qsend(remote_fd,rsp,strlen(rsp)+1,0);
 
-            char *path = "response.txt";
-            bytes_recv = qrecv_big(remote_fd,path,buf,MAXDATASIZE);
+            char *file_path = "response.html";
+            bytes_recv = qrecv_big(remote_fd,file_path,buf,MAXDATASIZE);
             close(remote_fd);
             printf("bytes_recv:%d\n",bytes_recv);
 
             // send this HTTP response to client as is
             char *response;
-            int filesize = readAll(path,&response);
+            int filesize = readAll(file_path,&response);
             printf("filesize:%d\n",filesize);
             bytes_sent = qsend(client_fd,response,filesize,0);
             printf("bytes_sent:%d\n",bytes_sent);
@@ -146,6 +177,7 @@ int main(int argc, char** argv) {
 
             // close client
             close(client_fd);
+            ParsedRequest_destroy(req);
             
             // exiting will kill the child process
             exit(0);

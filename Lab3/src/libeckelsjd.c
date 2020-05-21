@@ -340,7 +340,7 @@ int qrecv_big(int sockfd, char *path, char *buf, int datasize) {
     fd_set rfds;
     struct timeval tv;
     int retval;
-    tv.tv_sec = 1;
+    tv.tv_sec = 5;
     tv.tv_usec = 100000;
 
     // receive arbitrarily large file data

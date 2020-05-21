@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 
 #include <eckelsjd.h>
+#include <proxy_parse.h>
 
 #define PORT "3490"
 #define MAXDATASIZE 1024
